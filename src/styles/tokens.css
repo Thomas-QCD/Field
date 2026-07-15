@@ -1,0 +1,41 @@
+:root {
+  /* Brand — only saturated hue */
+  --color-accent: #732e75;
+  --color-accent-hover: #5a245c;
+  --color-accent-dark: #3f1941;
+  --color-accent-light: #9a559c;
+  --color-accent-muted: #c49ac5;
+  --color-accent-subtle: #f4ebf4;
+
+  /* Black–white neutrals */
+  --color-bg: #ececec;
+  --color-bg-accent: #e0e0e0;
+  --color-surface: #f5f5f5;
+  --color-surface-raised: #ffffff;
+  --color-sidebar: #141414;
+  --color-sidebar-hover: #2a2a2a;
+  --color-sidebar-active: #3f1941;
+  --color-text: #141414;
+  --color-text-muted: #666666;
+  --color-text-on-dark: #f0f0f0;
+  --color-text-on-dark-muted: #a3a3a3;
+  --color-border: #d4d4d4;
+
+  /* Status — exempt from brand-only rule; distinct hues for readability */
+  --color-status-created: #737373;
+  --color-status-unassigned: #a67c2e;
+  --color-status-assigned: #2b6cb0;
+  --color-status-loaded: #0d7a6f;
+  --color-status-arrived: #2f855a;
+  --color-status-completed: #525252;
+  --color-status-failed: #c53030;
+
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-display: 'Outfit', system-ui, sans-serif;
+
+  --sidebar-width: 15rem;
+  --topbar-height: 3.5rem;
+  --radius: 0.5rem;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 6%), 0 2px 8px rgb(0 0 0 / 4%);
+  --transition: 180ms ease;
+}
