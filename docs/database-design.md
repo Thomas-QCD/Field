@@ -10,7 +10,11 @@ Normalized relational schema for Field, derived from the flat task export in [`t
 - **Primary keys** — `bigint` identity for internal entities; `uuid` for users (Cognito `sub` for web-authenticated users).
 - **Timestamps** — `timestamptz` stored in UTC.
 - **Coordinates** — `numeric` latitude/longitude on `addresses` (not comma-separated strings).
-- **Sentinel values** — reference system uses `AssignedToTeamId: -1` for unassigned; Field uses `NULL`.
+- **No teams** — company-local workforce; tasks are assigned to individual **crew members** only. Reference `AssignedToTeamId` is ignored. Field does not use the word "driver".
+- **Task type / status** — PostgreSQL enums (`task_type`, `task_status`) stored as text labels on `tasks` (e.g. `Delivery`, `Loaded`). No FK from `tasks` to lookup tables.
+- **No dispatch address** — destination only; `dispatch_address_id` is not modeled.
+- **Contacts vs addresses** — `contacts` are people (name/phone/email). `addresses` are destinations with optional `address_name` (venue label). They are independent.
+- **Task assignment** — 0..many contacts via `task_contacts` (same pattern as `task_crew_members`); 0..1 destination via `tasks.destination_address_id`.
 
 ---
 
@@ -19,19 +23,13 @@ Normalized relational schema for Field, derived from the flat task export in [`t
 ```mermaid
 erDiagram
     users ||--o{ tasks : "creates"
-    users ||--o{ tasks : "assigned as driver"
-    users ||--o{ team_members : "member of"
-    teams ||--o{ team_members : "has"
-    teams ||--o{ tasks : "assigned to"
+    users ||--o{ task_crew_members : "assigned as crew"
+    tasks ||--o{ task_crew_members : "has crew"
 
-    recipients ||--o{ recipient_emails : "has"
-    recipients ||--o{ tasks : "deliver to"
+    contacts ||--o{ task_contacts : "contact on"
+    tasks ||--o{ task_contacts : "has contacts"
+    addresses ||--o| tasks : "destination"
 
-    addresses ||--o{ tasks : "dispatch"
-    addresses ||--o{ tasks : "destination"
-
-    task_types ||--o{ tasks : "classifies"
-    task_statuses ||--o{ tasks : "current status"
     task_statuses ||--o{ task_status_events : "logged as"
     tasks ||--o{ task_status_events : "history"
     tasks ||--o{ task_attachments : "has"
@@ -46,11 +44,11 @@ erDiagram
 
 | Group | Tables | Purpose |
 |-------|--------|---------|
-| Identity & access | `users`, `teams`, `team_members` | Creators (web auth), executors (assigned on tasks; mobile has no login) |
-| Locations | `addresses` | Reusable pickup and destination sites |
-| Contacts | `recipients`, `recipient_emails` | Venues/clients; multiple emails per recipient |
-| Task reference data | `task_types`, `task_statuses`, `task_status_transitions` | Lookup values and workflow rules |
-| Core | `tasks` | Primary unit of work |
+| Identity & access | `users`, `mobile_activation_codes`, `mobile_devices` | Web auth (Cognito); mobile QR activation + device sessions |
+| Locations | `addresses` | Job-site destinations with optional `address_name`; optional link from tasks |
+| Contacts | `contacts` | People (name, phone, email) — not venues |
+| Task reference data | `task_types`, `task_statuses`, `task_status_transitions` | Optional lookup / workflow metadata (tasks store enums directly) |
+| Core | `tasks`, `task_crew_members`, `task_contacts` | Primary unit of work; crew + contacts + optional destination |
 | Task extensions | `task_attachments`, `task_status_events`, `task_documents`, `email_deliveries` | Photos, audit, PDFs, outbound email log |
 
 ---
@@ -59,15 +57,15 @@ erDiagram
 
 ### `users`
 
-People who create or execute tasks. Web users authenticate via Cognito; `users.id` = Cognito `sub`. Mobile executors do not log in — user records still exist for assignment and audit, linked via task assignment rather than mobile session.
+People who create or execute tasks. Web users authenticate via Cognito; `users.id` = Cognito `sub`. Mobile crew members activate via QR (see below); user records still exist for assignment and audit.
 
 | Column | Type | Constraints | Maps from reference |
 |--------|------|-------------|---------------------|
-| `id` | `uuid` | PK | `AssignedToDriverUserId` |
-| `display_name` | `varchar(255)` | NOT NULL | `DriverName`, `TaskCreatedBy` |
+| `id` | `uuid` | PK | `AssignedToDriverUserId` (reference) |
+| `display_name` | `varchar(255)` | NOT NULL | `DriverName` (reference), `TaskCreatedBy` |
 | `email` | `varchar(255)` | UNIQUE, nullable | — |
 | `phone` | `varchar(50)` | nullable | — |
-| `role` | `varchar(50)` | NOT NULL | creator, executor, admin, supervisor (expand later) |
+| `role` | `varchar(50)` | NOT NULL | creator, crew, admin, supervisor (expand later) |
 | `is_active` | `boolean` | NOT NULL DEFAULT true | — |
 | `created_at` | `timestamptz` | NOT NULL | — |
 | `updated_at` | `timestamptz` | NOT NULL | — |
@@ -75,40 +73,57 @@ People who create or execute tasks. Web users authenticate via Cognito; `users.i
 **Notes:**
 
 - A user may hold multiple roles over time; MVP uses a single `role` column. Split to `user_roles` if needed later.
-- Executors are users with role `executor` (drivers in the reference system).
+- Crew members are users with role `crew` (called "driver" in the reference system — Field uses **crew member**).
 - **Web:** creators and admins authenticate; actions tied to logged-in user.
-- **Mobile:** no login — each executor has a **private build** with `userId` and `displayName` embedded at build time. API and audit fields use this identity on every request.
+- **Mobile:** shared Capacitor build ships deactivated; crew activates by scanning a QR issued for their user. Durable device session until revoked remotely.
 
 ### Authentication model
 
 | Client | User login | Typical actions |
 |--------|------------|-----------------|
-| Web | Yes (Cognito) | Create tasks, assign drivers, admin |
-| Mobile (Capacitor) | No | Private build with embedded `userId`; view assigned tasks, update status, upload photos |
+| Web | Yes (Cognito) | Create tasks, assign crew, admin, issue/revoke mobile access |
+| Mobile (Capacitor) | QR activation → device session | View assigned tasks, update status, upload photos |
 
-The `users` table is still required for assignment and web auth. Mobile does not login — identity comes from **build-time embedded config**, sent with each API request.
+The `users` table is required for assignment and web auth. Mobile identity comes from a **device session** created at QR activation (not build-time embedding).
 
-### `teams`
+### `mobile_activation_codes`
 
-Crews or dispatch groups. Tasks may be assigned to a team instead of (or in addition to) an individual driver.
+One-time (or short-lived) codes encoded in QR images issued from the web app for a specific crew user.
 
-| Column | Type | Constraints | Maps from reference |
-|--------|------|-------------|---------------------|
-| `id` | `bigint` | PK | `AssignedToTeamId` |
-| `name` | `varchar(255)` | NOT NULL | — |
-| `is_active` | `boolean` | NOT NULL DEFAULT true | — |
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| `id` | `uuid` | PK | — |
+| `user_id` | `uuid` | NOT NULL, FK → `users.id` | Crew member this code activates |
+| `code_hash` | `varchar(255)` | NOT NULL, UNIQUE | Store hash only — never plaintext |
+| `expires_at` | `timestamptz` | NOT NULL | Short TTL preferred |
+| `used_at` | `timestamptz` | nullable | Set when redeemed |
+| `created_by_user_id` | `uuid` | NOT NULL, FK → `users.id` | Admin/creator who issued |
 | `created_at` | `timestamptz` | NOT NULL | — |
-| `updated_at` | `timestamptz` | NOT NULL | — |
+| `revoked_at` | `timestamptz` | nullable | Invalidate unused codes |
 
-### `team_members`
+**Notes:** Exact payload format (URL vs opaque code) and one-time vs multi-use remain open (see Open Questions). Prefer single-use + expiry for MVP.
 
-Many-to-many: users belong to one or more teams.
+### `mobile_devices`
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `team_id` | `bigint` | PK, FK → `teams.id` |
-| `user_id` | `uuid` | PK, FK → `users.id` |
-| `joined_at` | `timestamptz` | NOT NULL |
+Registered devices after successful QR activation. Holds the durable session the app stores locally; admins revoke here to pull access remotely.
+
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| `id` | `uuid` | PK | — |
+| `user_id` | `uuid` | NOT NULL, FK → `users.id` | Bound crew member |
+| `token_hash` | `varchar(255)` | NOT NULL, UNIQUE | Hash of device session token |
+| `device_label` | `varchar(255)` | nullable | Optional (model / name from client) |
+| `activated_at` | `timestamptz` | NOT NULL | — |
+| `last_seen_at` | `timestamptz` | nullable | Updated on API use |
+| `revoked_at` | `timestamptz` | nullable | Remote pull — API returns 401 |
+| `revoked_by_user_id` | `uuid` | nullable, FK → `users.id` | Who revoked |
+| `activation_code_id` | `uuid` | nullable, FK → `mobile_activation_codes.id` | Audit trail |
+
+**Notes:**
+
+- Client stores the opaque session token permanently; server stores only `token_hash`.
+- On revoke: set `revoked_at`; next mobile request fails; app clears local session and shows QR activation again.
+- Whether one device per user or many is an open question — schema allows many.
 
 ---
 
@@ -116,54 +131,99 @@ Many-to-many: users belong to one or more teams.
 
 ### `addresses`
 
-Normalized pickup (dispatch) and destination locations. Referenced by tasks; optionally reusable across tasks and recipients later.
+Job-site destinations. Tasks may reference **0 or 1** address via `destination_address_id`. Field has **no pickup/dispatch address** — the company operates from one fixed location. Contacts (`contacts`) are not linked to addresses. Use `address_name` for the venue label users pick (e.g. Park MGM).
 
 | Column | Type | Constraints | Maps from reference |
 |--------|------|-------------|---------------------|
 | `id` | `bigint` | PK | — |
-| `street_line` | `varchar(500)` | NOT NULL | `DispatchAddress`, `DestinationAddress` |
-| `building` | `varchar(255)` | nullable | `DispatchBuilding`, `DestinationBuilding` |
-| `notes` | `text` | nullable | `DispatchNotes`, `DestinationNotes` |
-| `latitude` | `numeric(10,7)` | nullable | parsed from `*Coordinates` |
-| `longitude` | `numeric(10,7)` | nullable | parsed from `*Coordinates` |
+| `address_name` | `varchar(255)` | nullable | Venue / location display name (e.g. Park MGM) |
+| `street_line` | `varchar(500)` | NOT NULL | `DestinationAddress` |
+| `building` | `varchar(255)` | nullable | `DestinationBuilding` |
+| `notes` | `text` | nullable | `DestinationNotes` |
+| `latitude` | `numeric(10,7)` | nullable | parsed from `DestinationCoordinates` |
+| `longitude` | `numeric(10,7)` | nullable | parsed from `DestinationCoordinates` |
+| `deleted_at` | `timestamptz` | nullable | Soft delete — null = active |
 | `created_at` | `timestamptz` | NOT NULL | — |
 
-**Index:** `(latitude, longitude)` if geospatial queries are needed later (PostGIS optional).
+**Index:** `(address_name)`; `(latitude, longitude)` if geospatial queries are needed later (PostGIS optional).
+
+**Soft delete:** `DELETE` API sets `deleted_at = now()`. Lists and detail GET require `deleted_at IS NULL`.
 
 ---
 
 ## Contacts
 
-### `recipients`
+### `contacts`
 
-Venues, clients, or delivery targets. Master record for repeat destinations.
+Contacts (people to notify or reference on a task). Assigned to tasks through `task_contacts`, not stored as denormalized columns on `tasks`. Venue / place names belong on `addresses.address_name`, not here.
 
 | Column | Type | Constraints | Maps from reference |
 |--------|------|-------------|---------------------|
 | `id` | `bigint` | PK | `RecipientId` |
 | `name` | `varchar(255)` | NOT NULL | `RecipientName` |
 | `phone` | `varchar(50)` | nullable | `RecipientPhone` |
-| `default_address_id` | `bigint` | FK → `addresses.id`, nullable | future convenience |
-| `is_active` | `boolean` | NOT NULL DEFAULT true | — |
+| `email` | `varchar(255)` | nullable | `RecipientEmail` (single address) |
+| `deleted_at` | `timestamptz` | nullable | Soft delete — null = active |
 | `created_at` | `timestamptz` | NOT NULL | — |
 | `updated_at` | `timestamptz` | NOT NULL | — |
 
-### `recipient_emails`
+**Soft delete:** `DELETE` API sets `deleted_at = now()`. Lists and detail GET require `deleted_at IS NULL`.
 
-One recipient may have multiple notification emails (reference stores comma-separated list).
+---
 
-| Column | Type | Constraints | Maps from reference |
-|--------|------|-------------|---------------------|
-| `id` | `bigint` | PK | — |
-| `recipient_id` | `bigint` | FK → `recipients.id`, NOT NULL | — |
-| `email` | `varchar(255)` | NOT NULL | `RecipientEmail` (split) |
-| `is_primary` | `boolean` | NOT NULL DEFAULT false | — |
+## Task enums (on `tasks`)
 
-**Unique:** `(recipient_id, email)`
+PostgreSQL enum types store the text labels used by the reference export and the app.
+
+### `task_type` (enum)
+
+| Value |
+|-------|
+| `Delivery` |
+| `Install` |
+| `Removal` |
+| `Site Survey` |
+| `Pickup` |
+| `Other` |
+
+### `task_status` (enum)
+
+| Value | Notes |
+|-------|-------|
+| `Created` | Initial state |
+| `Unassigned` | No crew member yet |
+| `Assigned` | Crew member set |
+| `Loaded` | Example: en route / loaded on truck |
+| `Arrived` | On site |
+| `Completed` | Success terminal |
+| `Failed` | Failure terminal |
+| `Cancelled` | Cancelled in Wodely / voided |
+
+### Wodely sync mapping
+
+Live Wodely webhooks (`WOO-message-handler`) and reconciler (`updateModifiedWooTasks`) upsert into Postgres. **`tasks.id` = Wodely `Id`**.
+
+| Wodely `TypeDesc` | Field `task_type` |
+|-------------------|-------------------|
+| `Delivery` | `Delivery` |
+| `Pickup` | `Pickup` |
+| `Field Workforce` | `Install` |
+| `Appointment` | `Other` |
+| other / unknown | `Other` |
+
+| Wodely | Field `task_status` |
+|--------|---------------------|
+| `StatusDesc` Unassigned / Assigned / Loaded / Arrived / Completed / Failed | same |
+| `StatusDesc` `Transit` | `Loaded` |
+| Webhook `task-cancelled` | `Cancelled` |
+
+Lambda source: [`aws/lambdas/`](../aws/lambdas/). Dual-write keeps DynamoDB `WOO-tasks` and RDS `field` in sync.
 
 ---
 
 ## Task Reference Data
+
+Optional lookup tables for labels/sort order and transition rules. **`tasks` does not FK to these** — current type/status live as enums on the row.
 
 ### `task_types`
 
@@ -194,17 +254,7 @@ One recipient may have multiple notification emails (reference stores comma-sepa
 | `sort_order` | `smallint` | NOT NULL DEFAULT 0 |
 | `is_terminal` | `boolean` | NOT NULL DEFAULT false |
 
-**Seed data (from reference):**
-
-| code | name | is_terminal | Notes |
-|------|------|-------------|-------|
-| `created` | Created | false | Initial state |
-| `unassigned` | Unassigned | false | No driver/team yet |
-| `assigned` | Assigned | false | Driver or team set |
-| `loaded` | Loaded | false | Example: en route / loaded on truck |
-| `arrived` | Arrived | false | On site |
-| `completed` | Completed | true | Success terminal |
-| `failed` | Failed | true | Failure terminal |
+**Seed data:** same labels as the `task_status` enum (`created` → `Created`, etc.).
 
 ### `task_status_transitions`
 
@@ -233,47 +283,74 @@ Adjust when real workflow rules are confirmed.
 
 ## Core: `tasks`
 
-Central table. Denormalized display names from the reference (`DriverName`, `RecipientName`) are **not** stored — join related tables in queries/API responses.
+Central table. Contacts and crew are junction tables; destination is an optional FK to `addresses`.
 
 | Column | Type | Constraints | Maps from reference |
 |--------|------|-------------|---------------------|
 | `id` | `bigint` | PK | `Id` |
-| `task_type_id` | `smallint` | FK → `task_types.id`, NOT NULL | `TaskType` |
-| `status_id` | `smallint` | FK → `task_statuses.id`, NOT NULL | `Status` |
-| `description` | `text` | NOT NULL | `TaskDesc` |
+| `task_type` | `task_type` | enum, NOT NULL | `TaskType` |
+| `status` | `task_status` | enum, NOT NULL | `Status` |
+| `description` | `text` | nullable | `TaskDesc` |
 | `external_key` | `varchar(100)` | nullable, indexed | `ExternalKey` |
 | `created_by_user_id` | `uuid` | FK → `users.id`, NOT NULL | `TaskCreatedBy` (resolved to user) |
-| `assigned_driver_user_id` | `uuid` | FK → `users.id`, nullable | `AssignedToDriverUserId` |
-| `assigned_team_id` | `bigint` | FK → `teams.id`, nullable | `AssignedToTeamId` (NULL = unassigned) |
-| `recipient_id` | `bigint` | FK → `recipients.id`, nullable | `RecipientId` |
-| `dispatch_address_id` | `bigint` | FK → `addresses.id`, nullable | `Dispatch*` |
-| `destination_address_id` | `bigint` | FK → `addresses.id`, nullable | `Destination*` |
+| `destination_address_id` | `bigint` | FK → `addresses.id`, nullable | `Destination*` (0..1) |
 | `crew_size` | `smallint` | nullable | `Guys` |
 | `estimated_hours` | `numeric(5,2)` | nullable | `Hours` |
 | `is_time_specific` | `boolean` | NOT NULL DEFAULT false | `IsTimeSpecific` |
-| `can_install_early` | `boolean` | NOT NULL DEFAULT false | `CanInstallEarly` |
+| `can_start_early` | `boolean` | NOT NULL DEFAULT false | `CanInstallEarly` (Field: can start early — all task types) |
 | `window_start_at` | `timestamptz` | nullable | `AfterDateTime` |
 | `window_end_at` | `timestamptz` | nullable | `BeforeDateTime` |
 | `completed_notes` | `text` | nullable | `CompletedNotes` |
 | `completed_at` | `timestamptz` | nullable | `CompletedDateTime` |
 | `failed_reason` | `text` | nullable | `TaskFailedReason` |
+| `deleted_at` | `timestamptz` | nullable | Soft delete — null = active |
 | `created_at` | `timestamptz` | NOT NULL | `CreatedDateTime` |
 | `updated_at` | `timestamptz` | NOT NULL | `ModifiedDateTime` |
+
+**Soft delete:** `DELETE` API sets `deleted_at = now()`. Lists and detail GET require `deleted_at IS NULL`. Junction rows and destination FKs are left in place for history.
 
 **Constraints:**
 
 - `CHECK (window_end_at IS NULL OR window_start_at IS NULL OR window_end_at >= window_start_at)`
-- At most one of `assigned_driver_user_id` and `assigned_team_id` may be set, **or** both allowed if business assigns team + lead driver — confirm (default: allow either/both, nullable).
 
 **Indexes:**
 
-- `(status_id, assigned_driver_user_id)` — executor task list
-- `(status_id, window_start_at, window_end_at)` — dispatch board / scheduling
-- `(recipient_id)`
+- `(status, window_start_at, window_end_at)` — task board / scheduling
+- `(destination_address_id)`
 - `(external_key)` where not null
 - `(created_at DESC)`
 
-**Assignment rule (draft):** `assigned` status should require `assigned_driver_user_id` OR `assigned_team_id`. Enforce in service layer.
+**Crew assignment:** 0..many via `task_crew_members` (API/form: `crewMemberIds: string[]`).
+
+**Contact assignment:** 0..many via `task_contacts` (API/form: `contactIds: number[]`).
+
+**Destination:** 0..1 via `destinationAddressId` (pick existing venue by `address_name`), or create a new `addresses` row from `destinationAddressName` + street/building/notes.
+
+**Assignment rule (draft):** `Assigned` status should require at least one `task_crew_members` row. Enforce in service layer.
+
+**Out of scope:** `dispatch_address_id` — Field has no pickup/dispatch.
+
+### `task_crew_members`
+
+Junction: which crew members are assigned to a task.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `task_id` | `bigint` | PK, FK → `tasks.id` ON DELETE CASCADE |
+| `user_id` | `uuid` | PK, FK → `users.id` |
+
+**Index:** `(user_id)` — crew member task list / mobile scoping
+
+### `task_contacts`
+
+Junction: which contacts are on a task (mirrors `task_crew_members`).
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `task_id` | `bigint` | PK, FK → `tasks.id` ON DELETE CASCADE |
+| `contact_id` | `bigint` | PK, FK → `contacts.id` |
+
+**Index:** `(contact_id)`
 
 ---
 
@@ -358,22 +435,22 @@ Append-only audit log for status changes (and optional assignment changes).
 | Reference field | Relational home |
 |-----------------|-----------------|
 | `Id` | `tasks.id` |
-| `TaskType` | `tasks.task_type_id` → `task_types.code` |
-| `Status` | `tasks.status_id` → `task_statuses.code` |
+| `TaskType` | `tasks.task_type` (enum) |
+| `Status` | `tasks.status` (enum) |
 | `TaskDesc` | `tasks.description` |
 | `ExternalKey` | `tasks.external_key` |
-| `AssignedToDriverUserId` | `tasks.assigned_driver_user_id` → `users` |
-| `DriverName` | `users.display_name` (join) |
-| `AssignedToTeamId` | `tasks.assigned_team_id` → `teams` (`NULL` if unassigned) |
+| `AssignedToDriverUserId` | `task_crew_members.user_id` → `users` (one of many) |
+| `DriverName` | `users.display_name` (join via `task_crew_members`) |
+| `AssignedToTeamId` | Ignored — Field has no teams |
+| `Dispatch*` | Ignored — Field has no pickup/dispatch; one fixed origin |
 | `TaskCreatedBy` | `tasks.created_by_user_id` → `users` |
 | `Guys` | `tasks.crew_size` |
 | `Hours` | `tasks.estimated_hours` |
 | `AfterDateTime` / `BeforeDateTime` | `tasks.window_start_at` / `window_end_at` |
-| `IsTimeSpecific` / `CanInstallEarly` | `tasks.is_time_specific` / `can_install_early` |
-| `Dispatch*` | `tasks.dispatch_address_id` → `addresses` |
-| `Destination*` | `tasks.destination_address_id` → `addresses` |
-| `RecipientId` / `RecipientName` / `RecipientPhone` | `tasks.recipient_id` → `recipients` |
-| `RecipientEmail` | `recipient_emails` (one row per address) |
+| `IsTimeSpecific` / `CanInstallEarly` | `tasks.is_time_specific` / `can_start_early` |
+| `DestinationAddress` / `Building` / `Notes` | `tasks.destination_address_id` → `addresses` |
+| `RecipientId` | `task_contacts.contact_id` (0..many) |
+| `RecipientName` / `RecipientPhone` / `RecipientEmail` | `contacts` (join via `task_contacts`) |
 | `CompletedNotes` / `CompletedDateTime` | `tasks.completed_notes` / `completed_at` |
 | `TaskFailedReason` | `tasks.failed_reason` |
 | Photos (in `TaskDesc` instructions) | `task_attachments` at completion |
@@ -385,31 +462,31 @@ Append-only audit log for status changes (and optional assignment changes).
 
 ## API Read Model (example)
 
-Clients receive a denormalized task DTO assembled from joins — similar to the reference export for compatibility:
+Clients join contacts and destination from related tables:
 
 ```typescript
 interface TaskReadModel {
   id: number;
   taskType: string;
   status: string;
-  description: string;
+  description: string | null;
   externalKey: string | null;
-  assignedDriver: { id: string; displayName: string } | null;
-  assignedTeam: { id: number; name: string } | null;
-  recipient: {
-    id: number;
-    name: string;
-    emails: string[];
-    phone: string | null;
+  crewMemberIds: string[];
+  assignedCrew: { id: string; displayName: string }[];
+  contactIds: number[];
+  contacts: { id: number; name: string; phone: string; email: string }[];
+  destinationAddressId: number | null;
+  destination: {
+    streetLine: string;
+    building: string | null;
+    notes: string | null;
   } | null;
-  dispatchAddress: AddressDto | null;
-  destinationAddress: AddressDto | null;
   crewSize: number | null;
   estimatedHours: number | null;
   windowStartAt: string | null;
   windowEndAt: string | null;
   isTimeSpecific: boolean;
-  canInstallEarly: boolean;
+  canStartEarly: boolean;
   completedNotes: string | null;
   completedAt: string | null;
   failedReason: string | null;
@@ -423,16 +500,15 @@ interface TaskReadModel {
 
 ---
 
-## Deferred Tables (post-MVP)
+## Deferred / out of scope
 
-Do not build until requirements confirm need:
-
-| Table | Reason deferred |
-|-------|-----------------|
-| `task_line_items` | Materials embedded in `TaskDesc` today (e.g. "Signs x4") |
-| `recipient_addresses` | Link recipients to saved addresses when reuse patterns emerge |
-| `task_failure_reasons` | Free-text `failed_reason` sufficient for MVP |
-| `user_roles` | Single `role` column on `users` until multi-role is required |
+| Table | Status |
+|-------|--------|
+| `teams` / `team_members` | **Out of scope** — company-local; crew-member assignment only |
+| `task_line_items` | Deferred — materials embedded in `TaskDesc` today |
+| `recipient_emails` | **Removed** — single `contacts.email` column |
+| `task_failure_reasons` | Deferred — free-text `failed_reason` sufficient for MVP |
+| `user_roles` | Deferred — single `role` column on `users` until multi-role is required |
 
 ---
 
@@ -443,34 +519,33 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | Table | MVP |
 |-------|-----|
 | `users` | Yes |
-| `teams` | Optional — include if team assignment is day-one |
-| `team_members` | Optional |
-| `recipients` | Yes — if tasks reference repeat venues; else inline destination only |
-| `recipient_emails` | Yes if `recipients` included |
-| `addresses` | Yes |
-| `task_types` | Yes (seed) |
-| `task_statuses` | Yes (seed) |
+| `mobile_activation_codes` | Yes — when mobile crew flow is in scope |
+| `mobile_devices` | Yes — durable sessions + remote revoke |
+| `contacts` | Yes — contacts master |
+| `addresses` | Yes — destinations (0..1 per task) |
+| `task_types` | Optional — enums on `tasks` are source of truth |
+| `task_statuses` | Optional — enums on `tasks` are source of truth |
 | `task_status_transitions` | Optional — can hardcode in app for MVP |
 | `tasks` | Yes |
+| `task_crew_members` | Yes — multi-assign (`crewMemberIds`) |
+| `task_contacts` | Yes — multi-assign contacts (`contactIds`) |
 | `task_attachments` | Yes — photo proof on completion |
 | `task_documents` | Yes — PDF label, docket, POD |
 | `email_deliveries` | Yes — automatic email log |
 | `task_status_events` | Recommended — cheap audit trail |
 
-**MVP simplification option:** Skip `recipients` master table initially; store destination on `addresses` only and leave `recipient_id` null. Add `recipients` when venue reuse matters.
-
 ---
 
 ## Deployment placement
 
-**Local development (current):** All development is local until the user specifies AWS integration. See [`sdd.md`](sdd.md) Section 2.3 and 11.1.
+**Schema DDL:** [`db/migrations/`](../db/migrations/) — `001` baseline; apply later files incrementally (e.g. `005_tasks_status_and_type_enums.sql`, `006_task_crew_members.sql`). No seed rows yet.
 
-| Component | Local dev | Production target (AWS) |
-|-----------|-----------|-------------------------|
-| Database | PostgreSQL (Docker Compose) | Amazon RDS for PostgreSQL |
+| Component | Local / cloud-dev | Production target (AWS) |
+|-----------|-------------------|-------------------------|
+| Database | PostgreSQL (Docker) or RDS `field-dev` | Amazon RDS for PostgreSQL |
 | File blobs | `./storage/` filesystem | S3 — `task_attachments`, `task_documents` |
 | Email | Console / Mailpit | Amazon SES — `email_deliveries` |
-| Auth | Local dev auth stub | Cognito — web only; `users.id` = Cognito `sub` |
+| Auth | Local dev auth stub | Cognito — web; mobile device sessions via QR |
 
 Use storage and email abstractions so `storage_key` works for both local paths and S3 keys.
 
@@ -478,13 +553,12 @@ Use storage and email abstractions so `storage_key` works for both local paths a
 
 ## Open Questions
 
-- Confirm status transition rules with operations team
+- Confirm status transition rules with operations
 - PDF generation triggers per document type (label, docket, POD)
 - Email triggers and templates per task event
-- Per-executor build and distribution process
-- Whether to embed a mobile API token per build (recommended for production)
-- Team vs driver assignment: mutually exclusive or both?
-- Is `recipients` master data required for MVP, or destination-only tasks enough?
+- Mobile QR payload format, expiry, one-time vs multi-use
+- One active mobile device per crew member vs multiple devices
+- Address picker: select existing `addresses` by `address_name` vs free-text create on task form (picker + free-text both supported)
 - Unique constraint on `external_key` (per integration source)?
-- Soft-delete pattern (`deleted_at`) on tasks and users?
+- Soft-delete (`deleted_at`) on users? (tasks, contacts, addresses use `deleted_at`)
 - Timezone display: store UTC only; client converts?

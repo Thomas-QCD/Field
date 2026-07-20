@@ -1,9 +1,9 @@
 # Software Design Document (SDD)
 
 **Project:** Field  
-**Version:** 0.3 (draft)  
+**Version:** 0.7 (draft)  
 **Status:** Build (started) — web shell + Tasks page  
-**Last updated:** 2026-07-15
+**Last updated:** 2026-07-20
 
 ---
 
@@ -18,7 +18,7 @@ This document describes the software design for **Field**, a field workforce man
 Field mirrors and will eventually replace a third-party FWM product the organization currently licenses. The system supports:
 
 - Creating and assigning **tasks** (web, authenticated)
-- Executing tasks in the field (mobile, no login)
+- Executing tasks in the field (mobile, QR activation)
 - Generating **PDF documents** (shipping label, delivery docket, proof of delivery)
 - **Automatic email** delivery tied to task events
 
@@ -30,12 +30,13 @@ Engineers, architects, and AI agents implementing Field. For agent quick-referen
 
 ### 1.4 Related documents
 
-| Document | Contents |
-|----------|----------|
-| [`AGENTS.md`](../AGENTS.md) | Agent onboarding, decisions summary, open questions |
-| [`task-model.md`](task-model.md) | Reference task export from licensed system |
-| [`database-design.md`](database-design.md) | Full relational schema, indexes, MVP table subset |
-| [`critical-features.md`](critical-features.md) | PDF generation and automatic email requirements |
+| Document                                       | Contents                                            |
+| ---------------------------------------------- | --------------------------------------------------- |
+| [`AGENTS.md`](../AGENTS.md)                    | Agent onboarding, decisions summary, open questions |
+| [`task-model.md`](task-model.md)               | Reference task export from licensed system          |
+| [`database-design.md`](database-design.md)     | Full relational schema, indexes, MVP table subset   |
+| [`critical-features.md`](critical-features.md) | PDF generation and automatic email requirements     |
+| [`pdf-delivery-docket.md`](pdf-delivery-docket.md) | Delivery docket layout + local generator            |
 
 ---
 
@@ -49,31 +50,31 @@ Engineers, architects, and AI agents implementing Field. For agent quick-referen
 
 ### 2.2 Design constraints
 
-| Constraint | Decision |
-|------------|----------|
-| Primary domain unit | **Task** — creators create; executors execute |
-| Feature discipline | MVP-first; avoid feature creep |
-| Web platform | React + TypeScript, mobile-responsive |
-| Mobile platform | Capacitor (iOS/Android), same codebase, **private distribution** |
-| Web auth | **Required** — local stub in dev; **Amazon Cognito** in production |
-| Mobile auth | **None at runtime** — identity embedded in private per-executor build |
-| Database | **PostgreSQL** — local in dev; RDS on AWS in production |
-| Hosting | **Local dev now**; **AWS** when user integrates |
+| Constraint          | Decision                                                              |
+| ------------------- | --------------------------------------------------------------------- |
+| Primary domain unit | **Task** — creators create; crew members execute                      |
+| Feature discipline  | MVP-first; avoid feature creep                                        |
+| Web platform        | React + TypeScript, mobile-responsive                                 |
+| Mobile platform     | Capacitor (iOS/Android), same codebase, **private distribution** (shared build) |
+| Web auth            | **Required** — local stub in dev; **Amazon Cognito** in production    |
+| Mobile auth         | **QR activation** — durable on-device session; remotely revocable      |
+| Database            | **PostgreSQL** — Docker local and/or RDS `field-dev` (us-west-1)      |
+| Hosting             | **Local app**; AWS services provisioned only when requested           |
 
 ### 2.3 Development environment (local-first)
 
-**Until the user specifies otherwise, all development is local.** Do not provision AWS, deploy cloud resources, or integrate Cognito, RDS, S3, or SES.
+App and API run locally. **RDS PostgreSQL `field-dev`** is provisioned in `us-west-1` for cloud-backed development. Do not provision Cognito, S3, SES, or other AWS resources unless requested.
 
-| Concern | Local (current) | Production target (AWS, later) |
-|---------|-----------------|--------------------------------|
-| Database | PostgreSQL (Docker Compose or native) | RDS PostgreSQL |
-| API | `localhost` | API Gateway + ECS/Lambda |
-| Web app | Vite dev server | S3 + CloudFront |
-| Files / PDFs | Local `./storage` directory | S3 |
-| Web auth | Dev auth stub or simple JWT | Cognito |
-| Email | Console, file, or Mailpit | SES |
+| Concern      | Local (current)                              | AWS (current / target)        |
+| ------------ | -------------------------------------------- | ----------------------------- |
+| Database     | Docker PostgreSQL **or** RDS `field-dev`     | **RDS `field-dev`** (us-west-1) |
+| API          | `localhost`                                  | API Gateway + ECS/Lambda      |
+| Web app      | Vite dev server                              | S3 + CloudFront               |
+| Files / PDFs | Local `./storage` directory                  | S3                            |
+| Web auth     | Dev auth stub or simple JWT                  | Cognito                       |
+| Email        | Console, file, or Mailpit                    | SES                           |
 
-Use **provider abstractions** (storage, email, auth) so AWS can be swapped in without rewriting business logic. Agents must not run AWS deploys or create cloud resources unless the user explicitly requests integration.
+Use **provider abstractions** (storage, email, auth) so AWS can be swapped in without rewriting business logic. Agents must not create AWS resources unless the user explicitly requests them.
 
 ### 2.4 Critical features (non-negotiable)
 
@@ -124,20 +125,20 @@ flowchart TB
 
 ### 3.2 User roles
 
-| Role | Client | Auth | Primary actions |
-|------|--------|------|-----------------|
-| **Task creator** | Web | Yes (local / Cognito) | Create tasks, assign drivers/teams, view dispatch |
-| **Dispatcher / admin** | Web | Yes (local / Cognito) | Manage tasks, users, documents, emails |
-| **Task executor** (driver) | Mobile (Capacitor) | Embedded in private build | View assigned tasks, update status, capture photos, complete |
+| Role                       | Client             | Auth                              | Primary actions                                              |
+| -------------------------- | ------------------ | --------------------------------- | ------------------------------------------------------------ |
+| **Task creator**           | Web                | Yes (local / Cognito)             | Create tasks, assign crew, view task board                   |
+| **Admin**                  | Web                | Yes (local / Cognito)             | Manage tasks, users, documents, emails, mobile devices       |
+| **Crew member**            | Mobile (Capacitor) | QR activation → device session    | View assigned tasks, update status, capture photos, complete |
 
-Each executor receives a **private Capacitor build** with their `userId` and `displayName` embedded at build time. The API scopes mobile requests to that user and populates audit fields — no runtime login.
+The mobile app is a **shared private build** that ships **deactivated**. A crew member activates by scanning a QR issued for their user; the device keeps a durable session until revoked remotely.
 
 ### 3.3 Core workflow
 
 ```text
 ┌─────────────┐     ┌──────────────┐     ┌─────────────┐     ┌──────────────┐
-│ Create task │ ──► │ Assign driver│ ──► │ Execute in  │ ──► │ Complete +   │
-│   (web)     │     │   / team     │     │ field (mob) │     │ photos (mob) │
+│ Create task │ ──► │ Assign crew  │ ──► │ Execute in  │ ──► │ Complete +   │
+│   (web)     │     │   (web)      │     │ field (mob) │     │ photos (mob) │
 └─────────────┘     └──────────────┘     └─────────────┘     └──────────────┘
        │                    │                    │                    │
        ▼                    ▼                    ▼                    ▼
@@ -166,33 +167,34 @@ One React + TypeScript codebase with **runtime branching**:
 │                  React + TypeScript App                  │
 ├─────────────────────────┬───────────────────────────────┤
 │   Browser (web)         │   Capacitor shell (mobile)    │
-│   - Login (local/Cognito)│   - No login                  │
-│   - Full creator UI     │   - Executor UI only          │
-│   - Auth-gated routes   │   - Embedded userId per build │
+│   - Login (local/Cognito)│   - Deactivated until QR      │
+│   - Full creator UI     │   - QR scan → durable session │
+│   - Auth-gated routes   │   - Crew UI when activated    │
+│   - Issue / revoke QR   │   - Remote revoke → re-scan   │
 └─────────────────────────┴───────────────────────────────┘
 ```
 
-Detect environment via Capacitor API (`Capacitor.isNativePlatform()`). On mobile, load **executor config** baked in at build time (Vite env vars or bundled JSON).
+Detect environment via Capacitor API (`Capacitor.isNativePlatform()`). On mobile, if no valid local session, show activation (QR scan). After activation, persist the device session token securely on device.
 
 ### 4.3 API access patterns
 
-| Pattern | Client | Authentication | Endpoints (examples) |
-|---------|--------|----------------|----------------------|
-| **Web API** | Browser | JWT (local dev auth or Cognito) | CRUD tasks, assign, admin, download PDFs |
-| **Mobile API** | Capacitor | Embedded build identity (+ optional API token) | List/update **own** assigned tasks, upload photos |
+| Pattern        | Client    | Authentication                                 | Endpoints (examples)                              |
+| -------------- | --------- | ---------------------------------------------- | ------------------------------------------------- |
+| **Web API**    | Browser   | JWT (local dev auth or Cognito)                | CRUD tasks, assign, admin, download PDFs, issue/revoke mobile |
+| **Mobile API** | Capacitor | Device session token (from QR activation)      | Activate via QR, list/update **own** tasks, upload photos |
 
-Mobile requests send embedded `userId` (e.g. `X-Executor-User-Id` header). API returns only tasks where `assigned_driver_user_id` matches. Optionally validate an embedded per-build API token. Do not expose mobile write endpoints without this scoping.
+Mobile requests send the device session token (e.g. `Authorization: Bearer <deviceSessionToken>`). API resolves `userId` from the session, rejects revoked sessions with `401`, and returns only tasks where that user appears in `task_crew_members`. Do not expose mobile write endpoints without this scoping.
 
 ### 4.4 Recommended backend (proposal)
 
 Not finalized. Recommended MVP stack for AWS alignment:
 
-| Layer | Proposal | Rationale |
-|-------|----------|-----------|
-| API runtime | **Node.js** on ECS Fargate or Lambda + API Gateway | TypeScript shared types with frontend; good PDF/email library ecosystem |
-| ORM / migrations | **Drizzle** or **Prisma** | Type-safe PostgreSQL access |
-| PDF | **PDFKit** or HTML → PDF (Puppeteer on Fargate) | Template-based label/docket/POD |
-| Email | **AWS SDK → SES** | Native integration |
+| Layer            | Proposal                                           | Rationale                                                               |
+| ---------------- | -------------------------------------------------- | ----------------------------------------------------------------------- |
+| API runtime      | **Node.js** on ECS Fargate or Lambda + API Gateway | TypeScript shared types with frontend; good PDF/email library ecosystem |
+| ORM / migrations | **Drizzle** or **Prisma**                          | Type-safe PostgreSQL access                                             |
+| PDF              | **PDFKit** or HTML → PDF (Puppeteer on Fargate)    | Template-based label/docket/POD                                         |
+| Email            | **AWS SDK → SES**                                  | Native integration                                                      |
 
 Decision deferred to implementation kickoff.
 
@@ -210,25 +212,27 @@ create → assign → execute → complete | fail
 
 ### 5.2 Task types (seed data)
 
-| Code | Name |
-|------|------|
-| `delivery` | Delivery |
-| `install` | Install |
-| `removal` | Removal |
+| Code          | Name        |
+| ------------- | ----------- |
+| `delivery`    | Delivery    |
+| `install`     | Install     |
+| `removal`     | Removal     |
 | `site_survey` | Site Survey |
-| `other` | Other |
+| `pickup`      | Pickup      |
+| `other`       | Other       |
 
 ### 5.3 Task statuses (seed data)
 
-| Code | Name | Terminal |
-|------|------|----------|
-| `created` | Created | No |
-| `unassigned` | Unassigned | No |
-| `assigned` | Assigned | No |
-| `loaded` | Loaded | No |
-| `arrived` | Arrived | No |
-| `completed` | Completed | Yes |
-| `failed` | Failed | Yes |
+| Code         | Name       | Terminal |
+| ------------ | ---------- | -------- |
+| `created`    | Created    | No       |
+| `unassigned` | Unassigned | No       |
+| `assigned`   | Assigned   | No       |
+| `loaded`     | Loaded     | No       |
+| `arrived`    | Arrived    | No       |
+| `completed`  | Completed  | Yes      |
+| `failed`     | Failed     | Yes      |
+| `cancelled`  | Cancelled  | Yes      |
 
 ### 5.4 Status transitions (draft)
 
@@ -246,17 +250,20 @@ Confirm with operations before enforcing in code.
 
 ### 5.5 Key entities
 
-| Entity | Purpose |
-|--------|---------|
-| `users` | Creators, executors, admins; web auth via Cognito |
-| `teams` / `team_members` | Optional crew grouping |
-| `recipients` / `recipient_emails` | Venues/clients; multiple emails |
-| `addresses` | Dispatch (pickup) and destination locations |
-| `tasks` | Core work unit |
-| `task_attachments` | Photos, signatures (S3) |
-| `task_documents` | Generated PDFs (S3) |
-| `email_deliveries` | Outbound email audit log |
-| `task_status_events` | Status change history |
+| Entity                            | Purpose                                           |
+| --------------------------------- | ------------------------------------------------- |
+| `users`                           | Creators, crew members, admins; web auth via Cognito |
+| `mobile_activation_codes`         | QR codes issued to activate a crew device         |
+| `mobile_devices`                  | Durable mobile sessions; remote revoke            |
+| `contacts`                      | Contacts (name, phone, email)                     |
+| `addresses`                       | Destination (job site) locations                  |
+| `tasks`                           | Core work unit                                    |
+| `task_contacts`                 | Contacts assigned to a task (0..many)             |
+| `task_crew_members`               | Crew assigned to a task (0..many)                 |
+| `task_attachments`                | Photos, signatures (S3)                           |
+| `task_documents`                  | Generated PDFs (S3)                               |
+| `email_deliveries`                | Outbound email audit log                          |
+| `task_status_events`              | Status change history                             |
 
 Full column definitions: [`database-design.md`](database-design.md).
 
@@ -264,11 +271,11 @@ Full column definitions: [`database-design.md`](database-design.md).
 
 The licensed system exports a flat task record (example: delivery #12056480, status `Loaded`). Field normalizes this into related tables. Notable mappings:
 
-- `TaskDesc` → `tasks.description` (rich executor instructions, door codes, photo requirements)
-- `Destination*` → `addresses` via `destination_address_id`
-- `Dispatch*` → optional; null for delivery-only tasks
-- `RecipientEmail` (comma-separated) → `recipient_emails` rows
-- `DriverName` → join `users.display_name` (not stored on task)
+- `TaskDesc` → `tasks.description` (rich crew instructions, door codes, photo requirements)
+- `Destination*` → `tasks.destination_address_id` → `addresses` (0..1)
+- `Dispatch*` → ignored — Field has no pickup address (single fixed origin)
+- `RecipientName` / `Phone` / `Email` → `contacts` via `task_contacts` (0..many contacts)
+- `DriverName` (reference) → join `users.display_name` as crew name (not stored on task)
 
 Reference export: [`task-model.md`](task-model.md).
 
@@ -290,14 +297,14 @@ Reference export: [`task-model.md`](task-model.md).
 ```mermaid
 erDiagram
     users ||--o{ tasks : creates
-    users ||--o{ tasks : assigned_driver
-    teams ||--o{ tasks : assigned_team
-    recipients ||--o{ tasks : recipient
-    recipients ||--o{ recipient_emails : has
-    addresses ||--o{ tasks : dispatch
-    addresses ||--o{ tasks : destination
-    task_types ||--o{ tasks : type
-    task_statuses ||--o{ tasks : status
+    users ||--o{ task_crew_members : assigned_crew
+    users ||--o{ mobile_activation_codes : issued_for
+    users ||--o{ mobile_devices : owns
+    mobile_activation_codes ||--o| mobile_devices : redeems
+    tasks ||--o{ task_crew_members : has_crew
+    contacts ||--o{ task_contacts : contact_on
+    tasks ||--o{ task_contacts : has_contacts
+    addresses ||--o| tasks : destination
     tasks ||--o{ task_attachments : attachments
     tasks ||--o{ task_documents : documents
     tasks ||--o{ email_deliveries : emails
@@ -310,39 +317,43 @@ The API assembles a denormalized DTO for clients (similar to the licensed export
 
 ```typescript
 interface TaskReadModel {
-  id: number;
-  taskType: string;
-  status: string;
-  description: string;
-  externalKey: string | null;
-  assignedDriver: { id: string; displayName: string } | null;
-  assignedTeam: { id: number; name: string } | null;
-  recipient: { id: number; name: string; emails: string[]; phone: string | null } | null;
-  dispatchAddress: AddressDto | null;
-  destinationAddress: AddressDto | null;
-  crewSize: number | null;
-  estimatedHours: number | null;
-  windowStartAt: string | null;
-  windowEndAt: string | null;
-  isTimeSpecific: boolean;
-  canInstallEarly: boolean;
-  completedNotes: string | null;
-  completedAt: string | null;
-  failedReason: string | null;
-  attachments: TaskAttachmentDto[];
-  documents: TaskDocumentDto[];
-  createdBy: { id: string; displayName: string };
-  createdAt: string;
-  updatedAt: string;
+	id: number;
+	taskType: string;
+	status: string;
+	description: string | null;
+	externalKey: string | null;
+	crewMemberIds: string[];
+	assignedCrew: { id: string; displayName: string }[];
+	contact: {
+		id: number;
+		name: string;
+		emails: string[];
+		phone: string | null;
+	} | null;
+	destinationAddress: AddressDto | null;
+	crewSize: number | null;
+	estimatedHours: number | null;
+	windowStartAt: string | null;
+	windowEndAt: string | null;
+	isTimeSpecific: boolean;
+	canStartEarly: boolean;
+	completedNotes: string | null;
+	completedAt: string | null;
+	failedReason: string | null;
+	attachments: TaskAttachmentDto[];
+	documents: TaskDocumentDto[];
+	createdBy: { id: string; displayName: string };
+	createdAt: string;
+	updatedAt: string;
 }
 ```
 
 ### 6.4 File storage
 
-| Environment | Attachments & PDFs | Referenced by |
-|-------------|-------------------|---------------|
-| **Local dev** | `./storage/attachments`, `./storage/documents` | `storage_key` (relative path) |
-| **Production (AWS)** | S3 bucket(s) | `storage_key` (S3 object key) |
+| Environment          | Attachments & PDFs                             | Referenced by                 |
+| -------------------- | ---------------------------------------------- | ----------------------------- |
+| **Local dev**        | `./storage/attachments`, `./storage/documents` | `storage_key` (relative path) |
+| **Production (AWS)** | S3 bucket(s)                                   | `storage_key` (S3 object key) |
 
 Use a storage abstraction interface. Local: direct file read/write or local HTTP. Production: presigned S3 URLs. Do not serve files publicly without auth checks.
 
@@ -357,51 +368,73 @@ Use a storage abstraction interface. Local: direct file read/write or local HTTP
 - **Flow:** SPA login → JWT → API validates on each request
 - **User sync:** On login, create or update `users` row
 
-### 7.2 Mobile (embedded identity — no login)
+### 7.2 Mobile (QR activation — durable session, remotely revocable)
 
-Each executor gets a **private build** distributed internally (MDM, sideload). Identity is **embedded at build time**, not entered at runtime.
+The Capacitor app is a **shared private build** distributed internally (MDM, sideload). Builds ship **deactivated** — no user identity is embedded at build time.
 
-**Embedded config (per build):**
+**Activation flow:**
+
+```text
+1. Admin/creator (web) issues activation QR for a crew user
+2. Crew opens app → deactivated state → scans QR
+3. App POSTs activation code to API
+4. API validates code → creates mobile_devices row → returns deviceSessionToken + user profile
+5. App stores session permanently on device (secure storage)
+6. Subsequent launches skip QR and use stored session
+```
+
+**Remote revocation:**
+
+- Admin revokes a device (or all devices for a user) from the web app.
+- API marks `mobile_devices.revoked_at` (or deletes the session).
+- Next mobile request with that token returns `401`.
+- App clears local storage and returns to deactivated / scan-QR UI.
+- To the crew member, auth feels permanent until access is pulled remotely.
+
+**Local session shape (on device):**
 
 ```typescript
-interface ExecutorBuildConfig {
-  userId: string;           // UUID — matches users.id
-  displayName: string;      // shown in app header
-  apiBaseUrl: string;       // API endpoint
-  mobileApiToken?: string;  // optional — validates build authenticity
+interface MobileDeviceSession {
+	deviceSessionToken: string; // opaque; presented on every API call
+	userId: string; // UUID — matches users.id
+	displayName: string; // shown in app header
+	apiBaseUrl: string;
 }
 ```
 
 **Build approach:**
 
-- Vite build with per-executor env (e.g. `VITE_EXECUTOR_USER_ID`, `VITE_EXECUTOR_NAME`) or generated `executor.config.json` copied into the bundle before `cap sync`.
-- One IPA/APK (or build profile) per driver — not a shared generic mobile app.
-- No Cognito, login screens, or session storage in Capacitor builds.
+- One shared IPA/APK for all crew — not a per-person build.
+- No Cognito, password login, or build-time `userId` in Capacitor builds.
+- First-run / inactive gate: QR scanner (Camera / barcode plugin).
 
 **API behavior:**
 
-- Mobile middleware reads embedded identity from request headers (set by the app from build config).
-- Scope all mobile queries to `assigned_driver_user_id = userId`.
-- Set `changed_by_user_id` and `uploaded_by_user_id` from embedded `userId`.
-- Reject status updates on tasks not assigned to that driver.
+- `POST /mobile/activate` exchanges a valid QR payload for a device session.
+- Mobile middleware validates the device session token on protected routes.
+- Scope all mobile queries to tasks where `task_crew_members.user_id = userId`.
+- Set `changed_by_user_id` and `uploaded_by_user_id` from the session's `userId`.
+- Reject status updates on tasks not assigned to that crew member.
+- Reject revoked/unknown tokens with `401`.
 
 ### 7.3 Authorization (draft)
 
-| Action | Web (authenticated) | Mobile (embedded identity) |
-|--------|---------------------|----------------------------|
-| Create / edit tasks | Creator, admin | Deny |
-| Assign driver | Creator, admin | Deny |
-| View assigned tasks | Any authenticated | Own assignments only (`userId`) |
-| Update task status | Creator, assigned executor | Own assignments only |
-| Upload photos | Assigned executor | Own assignments only |
-| Download PDFs | Authenticated | Own task PDFs |
+| Action              | Web (authenticated)             | Mobile (device session)         |
+| ------------------- | ------------------------------- | ------------------------------- |
+| Create / edit tasks | Creator, admin                  | Deny                            |
+| Assign crew         | Creator, admin                  | Deny                            |
+| Issue / revoke QR   | Creator, admin                  | Deny                            |
+| View assigned tasks | Any authenticated               | Own assignments only (`userId`) |
+| Update task status  | Creator, assigned crew member   | Own assignments only            |
+| Upload photos       | Assigned crew member            | Own assignments only            |
+| Download PDFs       | Authenticated                   | Own task PDFs                   |
 
-Implement role checks in API middleware for web routes. Mobile routes validate embedded identity and enforce assignment scoping.
+Implement role checks in API middleware for web routes. Mobile routes validate the device session and enforce assignment scoping.
 
 ### 7.4 Security considerations
 
-- Each private build is tied to one `userId` — treat builds like credentials; do not share across drivers
-- Consider embedding a per-build `mobileApiToken` so API can reject requests without valid token
+- Treat activation QR codes like credentials — short-lived / single-use preferred; do not leave codes displayed indefinitely
+- Treat device session tokens like credentials — store hashed at rest on the server; revoke on demand
 - Validate status transitions server-side; do not trust client state
 - Sanitize PDF/email template inputs
 - SES domain verification and SPF/DKIM before production email (not needed for local Mailpit/console)
@@ -412,11 +445,11 @@ Implement role checks in API middleware for web routes. Mobile routes validate e
 
 ### 8.1 PDF document generation
 
-| Document | Kind code | Typical trigger (TBD) |
-|----------|-----------|------------------------|
-| Shipping label | `shipping_label` | Status → `loaded` |
-| Delivery docket | `delivery_docket` | Status → `assigned` |
-| POD | `pod` | Status → `completed` |
+| Document        | Kind code         | Typical trigger (TBD) |
+| --------------- | ----------------- | --------------------- |
+| Shipping label  | `shipping_label`  | Status → `loaded`     |
+| Delivery docket | `delivery_docket` | Status → `assigned`   |
+| POD             | `pod`             | Status → `completed`  |
 
 **Pipeline:**
 
@@ -438,16 +471,16 @@ Task event → API creates email_deliveries (pending) → email provider send
 
 **Local dev:** log email body to console, write to file, or use Mailpit. **Production:** Amazon SES.
 
-**Data sources:** `recipient_emails`, task fields, links to PDFs.
+**Data sources:** assigned contact emails (`contacts` via `task_contacts`), task fields, links to PDFs.
 
 **Draft trigger matrix** (confirm with operations):
 
-| Event | Email purpose |
-|-------|---------------|
-| Task assigned | Internal / driver notification |
-| Task loaded | Warehouse / dispatch |
-| Task completed | POD or completion notice to recipient |
-| Task failed | Alert creator or recipient |
+| Event          | Email purpose                         |
+| -------------- | ------------------------------------- |
+| Task assigned  | Internal / crew notification          |
+| Task loaded    | Warehouse / dispatch                  |
+| Task completed | POD or completion notice to contact |
+| Task failed    | Alert creator or contact            |
 
 ### 8.3 MVP bar for documents and email
 
@@ -465,24 +498,32 @@ Backend framework and OpenAPI spec are **not yet written**. Planned resource gro
 
 ### 9.1 Web endpoints (JWT required)
 
-| Group | Operations |
-|-------|------------|
-| `/tasks` | List, create, get, update, assign |
-| `/tasks/:id/status` | Transition status (with validation) |
-| `/tasks/:id/documents` | List, generate, download PDFs |
-| `/users` | List executors, manage (admin) |
-| `/recipients` | CRUD recipients and emails |
+| Group                  | Operations                          |
+| ---------------------- | ----------------------------------- |
+| `/tasks`               | List, create, get, update, assign   |
+| `/tasks/:id/status`    | Transition status (with validation) |
+| `/tasks/:id/documents` | List, generate, download PDFs       |
+| `/users`               | List crew members, manage (admin)   |
+| `/contacts`          | CRUD contacts                       |
 
-### 9.2 Mobile endpoints (no JWT; protected TBD)
+### 9.2 Mobile endpoints (device session; activation before use)
 
-| Group | Operations |
-|-------|------------|
-| `/mobile/tasks` | List tasks assigned to embedded `userId` |
-| `/mobile/tasks/:id` | Get task detail (403 if not assigned to caller) |
-| `/mobile/tasks/:id/status` | Update status (assigned tasks only) |
-| `/mobile/tasks/:id/attachments` | Upload photo (presigned URL flow) |
+| Group                           | Operations                                      |
+| ------------------------------- | ----------------------------------------------- |
+| `/mobile/activate`              | Exchange QR activation code for device session  |
+| `/mobile/tasks`                 | List tasks assigned to session `userId`         |
+| `/mobile/tasks/:id`             | Get task detail (403 if not assigned to caller) |
+| `/mobile/tasks/:id/status`      | Update status (assigned tasks only)             |
+| `/mobile/tasks/:id/attachments` | Upload photo (presigned URL flow)               |
 
-All mobile endpoints require embedded identity headers from the private build.
+`/mobile/activate` is unauthenticated (code is the credential). All other mobile endpoints require a valid, non-revoked device session token.
+
+**Web admin (related):**
+
+| Group                         | Operations                                      |
+| ----------------------------- | ----------------------------------------------- |
+| `/users/:id/mobile-activations` | Issue activation QR / code for a crew user    |
+| `/users/:id/mobile-devices`     | List devices; revoke one or all               |
 
 ### 9.3 Shared conventions
 
@@ -501,16 +542,16 @@ All mobile endpoints require embedded identity headers from the private build.
 - **Stack:** React 18+, TypeScript, Vite, React Router, lucide-react
 - **Scaffold status:** Underway — app shell (hamburger + left nav) and **Tasks** page with mock data grid; auth and API not wired yet
 - **Auth:** Local dev login (production: Cognito hosted UI or embedded login)
-- **Views (MVP):** Login, task list/board, task create/edit, task detail, assign driver, PDF download
+- **Views (MVP):** Login, task list/board, task create/edit, task detail, assign crew, PDF download
 - **Responsive:** Mobile-first shell; usable on phone through desktop
 
 ### 10.2 Mobile application (Capacitor)
 
 - **Stack:** Same React build inside Capacitor 6+
-- **Plugins (anticipated):** Camera, Filesystem, optional Push Notifications
-- **Views (MVP):** Task list (assigned), task detail, status actions, camera capture
-- **Distribution:** One **private build per executor** — identity embedded at build time; MDM or sideload
-- **No auth UI** — app opens directly to that driver's task list
+- **Plugins (anticipated):** Camera / barcode (QR), Filesystem, optional Push Notifications
+- **Views (MVP):** Activation (QR scan), task list (assigned), task detail, status actions, camera capture
+- **Distribution:** One **shared private build**; MDM or sideload — ships deactivated
+- **Auth UX:** Deactivated until valid QR; then durable local session until remote revoke
 
 ### 10.3 Build and release flow
 
@@ -521,17 +562,16 @@ All mobile endpoints require embedded identity headers from the private build.
 2. npm run build           → web assets for creators/dispatch
 ```
 
-**Mobile (per-executor private build):**
+**Mobile (shared private build):**
 
 ```text
-1. Set executor env       → VITE_EXECUTOR_USER_ID, VITE_EXECUTOR_NAME, optional token
-2. npm run build:mobile   → Capacitor bundle with embedded config
-3. npx cap sync           → copy into iOS/Android project
-4. Build IPA/APK          → distribute to that driver only (MDM / sideload)
-5. Repeat                 → one build per executor
+1. npm run build:mobile   → Capacitor web bundle (no per-user env)
+2. npx cap sync           → copy into iOS/Android project
+3. Build IPA/APK          → distribute to crew (MDM / sideload)
+4. On device              → scan activation QR issued from web for that user
 ```
 
-For local dev, use a single `.env.mobile.local` with a test executor UUID. Automate step 1–4 with a build script when driver count grows.
+For local dev, simulate activation with a test code or a mocked QR payload against the local API. Automate Cap sync / native builds when ready — **not** one binary per crew member.
 
 AWS deploy (S3/CloudFront for web) happens only when the user directs integration.
 
@@ -541,48 +581,48 @@ AWS deploy (S3/CloudFront for web) happens only when the user directs integratio
 
 ### 11.1 Local development (current)
 
-All work happens on the developer machine until the user specifies AWS integration:
+App, API, storage, email, and auth run on the developer machine. Database may be local Docker **or** the provisioned RDS instance:
 
-| Component | Local setup |
-|-----------|-------------|
-| Database | PostgreSQL via Docker Compose (`docker compose up`) |
-| API | Node process on `localhost:3000` (port TBD) |
-| Web | Vite on `localhost:5173` |
-| Storage | `./storage/` directory |
-| Email | Console log or Mailpit |
-| Auth | Dev user seed + local JWT |
+| Component | Local setup                                         |
+| --------- | --------------------------------------------------- |
+| Database  | Docker Compose **or** RDS `field-dev` (us-west-1)   |
+| API       | Node process on `localhost:3000` (port TBD)         |
+| Web       | Vite on `localhost:5173`                            |
+| Storage   | `./storage/` directory                              |
+| Email     | Console log or Mailpit                              |
+| Auth      | Dev user seed + local JWT                           |
 
-Provide a `docker-compose.yml` for PostgreSQL (and optionally Mailpit). Include `.env.example` for local configuration.
+Connection placeholders: [`.env.example`](../.env.example).
 
-### 11.2 AWS (production target — integrate when user specifies)
+### 11.2 AWS
 
-Do not provision until requested.
+| Component          | Service                                 | Status / notes                                       |
+| ------------------ | --------------------------------------- | ---------------------------------------------------- |
+| Database           | RDS PostgreSQL `field-dev`              | **Provisioned** — us-west-1, `db.t4g.micro`, Single-AZ, 20 GB gp3, public + IP-locked SG |
+| Secrets            | Secrets Manager                         | Master password for `field-dev`                      |
+| Static web hosting | S3 + CloudFront                         | Not yet                                              |
+| API                | API Gateway + ECS Fargate _(or Lambda)_ | Not yet                                              |
+| Auth               | Cognito                                 | Not yet (web only)                                   |
+| Object storage     | S3                                      | Not yet                                              |
+| Email              | SES                                     | Not yet                                              |
+| Async jobs         | SQS + Lambda _(optional)_               | Not yet                                              |
+| DNS / TLS          | Route 53 + ACM                          | Not yet                                              |
 
-| Component | Service | Notes |
-|-----------|---------|-------|
-| Static web hosting | S3 + CloudFront | React SPA |
-| API | API Gateway + ECS Fargate *(or Lambda)* | TBD |
-| Database | RDS PostgreSQL | Single-AZ for MVP; Multi-AZ for prod |
-| Auth | Cognito | Web only |
-| Object storage | S3 | Attachments + PDFs |
-| Email | SES | Verified sending domain |
-| Async jobs | SQS + Lambda *(optional)* | PDF/email offload |
-| Secrets | Secrets Manager | DB creds, API keys |
-| DNS / TLS | Route 53 + ACM | Custom domain |
+**`field-dev` details:** identifier `field-dev`, DB name `field`, user `field_admin`, endpoint in `.env.example`. Security group `field-dev-db-sg` allows TCP 5432 from the developer public IP only. MVP tables via [`db/migrations/`](../db/migrations/) (empty — no seed data). Fresh DB: `npm run db:schema`. Incremental: `npm run db:schema -- db/migrations/<file>.sql`.
 
 ### 11.3 Environments
 
-| Environment | Purpose |
-|-------------|---------|
-| `dev` | Local machine + Docker PostgreSQL |
-| `staging` | AWS pre-production (when integrated) |
-| `prod` | AWS live (when integrated) |
+| Environment | Purpose                                           |
+| ----------- | ------------------------------------------------- |
+| `dev`       | Local machine; Docker PostgreSQL and/or RDS `field-dev` |
+| `staging`   | AWS pre-production (when integrated)              |
+| `prod`      | AWS live (when integrated)                        |
 
-Infrastructure as Code (CDK or Terraform) — adopt when moving to AWS, not for initial local setup.
+Infrastructure as Code (CDK or Terraform) — not yet; `field-dev` was created via AWS CLI.
 
 ### 11.4 AWS MVP stack (when integrating)
 
-Start with: RDS PostgreSQL, S3, Cognito, SES, one API compute target, CloudFront + S3 for web. Add SQS when PDF/email async is implemented.
+RDS is started. Next when requested: S3, Cognito, SES, one API compute target, CloudFront + S3 for web. Add SQS when PDF/email async is implemented.
 
 ---
 
@@ -590,33 +630,33 @@ Start with: RDS PostgreSQL, S3, Cognito, SES, one API compute target, CloudFront
 
 ### 12.1 In scope
 
-| Area | MVP deliverable |
-|------|-----------------|
-| Web auth | Local dev login (Cognito when on AWS) |
-| Tasks | Create, assign, list, view, status updates |
-| Mobile | Executor task list, status update, photo upload (Capacitor) |
-| Data | Core tables per [`database-design.md`](database-design.md) MVP subset |
-| PDF | At least one type (recommend: **delivery docket** first) |
-| Email | At least one automatic send (recommend: **completion → recipient**) |
-| Audit | `task_status_events`, `email_deliveries` logging |
+| Area     | MVP deliverable                                                       |
+| -------- | --------------------------------------------------------------------- |
+| Web auth | Local dev login (Cognito when on AWS)                                 |
+| Tasks    | Create, assign, list, view, status updates                            |
+| Mobile   | QR activation, crew task list, status update, photo upload (Capacitor) |
+| Data     | Core tables per [`database-design.md`](database-design.md) MVP subset |
+| PDF      | At least one type (recommend: **delivery docket** first)              |
+| Email    | At least one automatic send (recommend: **completion → contact**)   |
+| Audit    | `task_status_events`, `email_deliveries` logging                      |
 
 ### 12.2 Explicitly deferred
 
-| Item | Reason |
-|------|--------|
-| `task_line_items` | Materials in `description` text for now |
-| `recipient_addresses` | Add when venue reuse patterns emerge |
-| Public app store mobile release | Private distribution only |
-| SMS notifications | Email only for now |
-| Offline-first mobile | Not required unless requirements change |
-| Integrations (payroll, CRM, GPS) | Post-MVP |
+| Item                             | Reason                                  |
+| -------------------------------- | --------------------------------------- |
+| `task_line_items`                | Materials in `description` text for now |
+| `contact_addresses`              | Deferred — contacts and addresses stay separate |
+| Public app store mobile release  | Private distribution only               |
+| SMS notifications                | Email only for now                      |
+| Offline-first mobile             | Not required unless requirements change |
+| Integrations (payroll, CRM, GPS) | Post-MVP                                |
 
 ### 12.3 Suggested implementation order
 
 1. **Foundation** — repo scaffold, Docker PostgreSQL, schema migrations, local auth stub, API health
 2. **Task CRUD (web)** — create, list, view, assign
 3. **Status workflow** — transitions + `task_status_events`
-4. **Mobile executor flow** — Capacitor build, task list, status, photo upload
+4. **Mobile crew flow** — Capacitor build, QR activation, task list, status, photo upload
 5. **PDF pipeline** — one template, local `./storage/documents`
 6. **Email pipeline** — one trigger, local console/Mailpit
 7. **Remaining PDFs and email triggers** — expand matrix
@@ -628,14 +668,14 @@ Implement **vertical slices** (UI → API → DB → storage) per step, not hori
 
 ## 13. Non-functional requirements
 
-| Requirement | Target (MVP) |
-|-------------|--------------|
-| Availability | Best effort; single region |
-| Performance | Task list < 2s on mobile LTE |
-| Data durability | Local: Docker volume; AWS: RDS backups + S3 |
-| Timezone | Store UTC; display in local TZ on client |
-| Browser support | Latest Chrome, Edge, Safari |
-| Mobile OS | Current iOS and Android (Capacitor supported versions) |
+| Requirement     | Target (MVP)                                           |
+| --------------- | ------------------------------------------------------ |
+| Availability    | Best effort; single region                             |
+| Performance     | Task list < 2s on mobile LTE                           |
+| Data durability | Local: Docker volume; AWS: RDS backups + S3            |
+| Timezone        | Store UTC; display in local TZ on client               |
+| Browser support | Latest Chrome, Edge, Safari                            |
+| Mobile OS       | Current iOS and Android (Capacitor supported versions) |
 
 ---
 
@@ -643,46 +683,50 @@ Implement **vertical slices** (UI → API → DB → storage) per step, not hori
 
 ### 14.1 Open issues (must resolve during build)
 
-| # | Issue | Impact |
-|---|-------|--------|
-| O1 | Per-executor build pipeline (script/CI) | Operations |
-| O2 | Embed `mobileApiToken` per build? | Security |
-| O3 | PDF/email trigger matrix | Feature completeness |
-| O4 | PDF template layouts | Document quality |
-| O5 | Backend runtime choice (Lambda vs ECS) | DevOps |
-| O6 | Status transition confirmation | Business logic |
-| O7 | `recipients` master table required for MVP? | Schema scope |
-| O8 | Licensed product name/vendor | Parity validation |
+| #   | Issue                                       | Impact               |
+| --- | ------------------------------------------- | -------------------- |
+| O1  | QR payload format, expiry, one-time vs multi-use | Security / UX        |
+| O2  | One mobile device per user vs multiple           | Operations           |
+| O3  | PDF/email trigger matrix                    | Feature completeness |
+| O4  | PDF template layouts                        | Document quality     |
+| O5  | Backend runtime choice (Lambda vs ECS)      | DevOps               |
+| O6  | Status transition confirmation              | Business logic       |
+| O7  | Address picker UX (free-text create vs select existing) | UX / schema          |
+| O8  | Licensed product name/vendor                | Parity validation    |
 
 ### 14.2 Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Single codebase web/mobile diverges in behavior | Strict runtime detection; shared components; separate route configs |
-| Unauthenticated mobile API abused | Per-build identity + optional token; scope to assigned tasks; rate limiting |
-| PDF/email blocks task updates | Async queue from day one |
-| Scope creep beyond licensed parity | Task-first scoping rule; SDD change control |
-| Capacitor limits (offline, native UX) | Document tradeoffs; revisit React Native only if required |
+| Risk                                            | Mitigation                                                                  |
+| ----------------------------------------------- | --------------------------------------------------------------------------- |
+| Unauthenticated / stolen QR or session abused   | Short-lived/single-use codes; hashed device tokens; remote revoke; rate limiting |
+| Single codebase web/mobile diverges in behavior | Strict runtime detection; shared components; separate route configs         |
+| PDF/email blocks task updates                   | Async queue from day one                                                    |
+| Scope creep beyond licensed parity              | Task-first scoping rule; SDD change control                                 |
+| Capacitor limits (offline, native UX)           | Document tradeoffs; revisit React Native only if required                   |
 
 ---
 
 ## 15. Document history
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.1 | 2026-07-15 | — | Initial SDD synthesized from pre-design docs |
-| 0.2 | 2026-07-15 | — | Local-first development; AWS deferred until user specifies |
-| 0.3 | 2026-07-15 | — | Mobile: per-executor private builds with embedded identity |
+| Version | Date       | Author | Changes                                                    |
+| ------- | ---------- | ------ | ---------------------------------------------------------- |
+| 0.1     | 2026-07-15 | —      | Initial SDD synthesized from pre-design docs               |
+| 0.2     | 2026-07-15 | —      | Local-first development; AWS deferred until user specifies |
+| 0.3     | 2026-07-15 | —      | Mobile: per-executor private builds with embedded identity |
+| 0.4     | 2026-07-16 | —      | RDS `field-dev` provisioned in us-west-1 for cloud-backed local development |
+| 0.5     | 2026-07-16 | —      | Removed teams — crew-member assignment only                                |
+| 0.6     | 2026-07-16 | —      | Terminology: "driver" → "crew member"; `assigned_crew_user_id`             |
+| 0.7     | 2026-07-20 | —      | Mobile auth: shared build + QR activation; durable session; remote revoke  |
 
 ---
 
 ## Appendix A: Glossary
 
-| Term | Definition |
-|------|------------|
-| **Task** | Unit of field work — created by office staff, executed by drivers |
-| **Executor** | Field worker (driver) who performs a task |
-| **POD** | Proof of delivery — PDF documenting completion |
-| **Docket** | Delivery instruction packet for the driver |
-| **Recipient** | Venue or client receiving delivery |
-| **Capacitor** | Native shell wrapping the web app for iOS/Android |
+| Term          | Definition                                                        |
+| ------------- | ----------------------------------------------------------------- |
+| **Task**         | Unit of field work — created by office staff, executed by crew |
+| **Crew member**  | Field worker who performs a task (not called "driver" in Field) |
+| **POD**          | Proof of delivery — PDF documenting completion                 |
+| **Docket**       | Delivery instruction packet for the crew                       |
+| **Contact** | Venue or client receiving delivery                                |
+| **Capacitor** | Native shell wrapping the web app for iOS/Android                 |

@@ -2,7 +2,7 @@
 
 Reference task shape from the licensed FWM product. This is a **rough draft** captured from a real example — not a finalized Field schema. Use it for parity discussions and MVP scoping.
 
-**Source example:** Delivery task #12056480, status `Loaded`, assigned to driver Rick Sekikawa.
+**Source example:** Delivery task #12056480, status `Loaded`, assigned to Rick Sekikawa (reference calls this "driver"; Field uses **crew member**).
 
 ---
 
@@ -54,8 +54,8 @@ Reference task shape from the licensed FWM product. This is a **rough draft** ca
 | Field | Type (observed) | Notes |
 |-------|-----------------|-------|
 | `Id` | integer | Internal primary key |
-| `TaskType` | string | Example: `Delivery`. enum: Delivery, Install, Removal, Site Survey, Other |
-| `Status` | string | Example: `Loaded`. enum: Created assigned loaded unassigned completed failed arrived |
+| `TaskType` | string | Example: `Delivery`. Field enum: Delivery, Install, Removal, Site Survey, Pickup, Other. Wodely also sends Field Workforce → Install, Appointment → Other |
+| `Status` | string | Example: `Loaded`. Field enum: Created, Unassigned, Assigned, Loaded, Arrived, Completed, Failed, Cancelled. Wodely Transit → Loaded |
 | `TaskDesc` | string (multiline) | Free-text instructions; may include job codes, access codes, photo requirements |
 | `ExternalKey` | string | Reference to an external system (e.g. order/job number) |
 
@@ -63,9 +63,9 @@ Reference task shape from the licensed FWM product. This is a **rough draft** ca
 
 | Field | Type (observed) | Notes |
 |-------|-----------------|-------|
-| `AssignedToTeamId` | integer | `-1` in example may mean unassigned to a team |
-| `AssignedToDriverUserId` | UUID string | Assigned executor (driver) |
-| `DriverName` | string | Denormalized display name for assigned driver |
+| `AssignedToTeamId` | integer | Reference only — Field has no teams; ignore on import |
+| `AssignedToDriverUserId` | UUID string | Assigned crew member user ID (Field: one of `task_crew_members` / `crewMemberIds[]`) |
+| `DriverName` | string | Denormalized display name — Field maps to crew member `display_name` |
 | `Guys` | integer | Crew size estimate |
 | `Hours` | integer | Time estimate (hours) |
 
@@ -78,18 +78,18 @@ Reference task shape from the licensed FWM product. This is a **rough draft** ca
 | `AfterDateTime` | datetime | Earliest allowed start / window open |
 | `BeforeDateTime` | datetime | Latest allowed completion / window close |
 | `IsTimeSpecific` | boolean | Whether task is tied to a specific time |
-| `CanInstallEarly` | boolean | Whether early execution is permitted |
+| `CanInstallEarly` | boolean | Whether early execution is permitted. Field: `can_start_early` / `canStartEarly` (all task types, not Install-only) |
 
-### Dispatch (origin / pickup)
+### Dispatch (origin / pickup) — reference only
 
-All nullable in the example — used when pickup location matters.
+Present in the licensed export (all null in the example). **Out of scope for Field** — the company operates from one fixed location; Field does not model pickup/dispatch addresses.
 
 | Field | Type (observed) | Notes |
 |-------|-----------------|-------|
-| `DispatchAddress` | string \| null | Pickup street address |
-| `DispatchBuilding` | string \| null | Building or area name at pickup |
-| `DispatchNotes` | string \| null | Pickup instructions |
-| `DispatchCoordinates` | string \| null | Lat/lng (format TBD) |
+| `DispatchAddress` | string \| null | Ignored |
+| `DispatchBuilding` | string \| null | Ignored |
+| `DispatchNotes` | string \| null | Ignored |
+| `DispatchCoordinates` | string \| null | Ignored |
 
 ### Destination (delivery / job site)
 
@@ -100,12 +100,14 @@ All nullable in the example — used when pickup location matters.
 | `DestinationCoordinates` | string | `"lat,lng"` — e.g. `"36.0891232,-115.174605"` |
 | `DestinationNotes` | string \| null | Additional site instructions |
 
-### Recipient (contacts)
+Field stores destinations in `addresses` with an optional **`address_name`** (venue label such as Park MGM) so users pick by name rather than street.
+
+### Contact (contacts)
 
 | Field | Type (observed) | Notes |
 |-------|-----------------|-------|
-| `RecipientId` | integer | Recipient entity ID |
-| `RecipientName` | string | Display name (e.g. venue/client) |
+| `RecipientId` | integer | Contact entity ID |
+| `RecipientName` | string | Display name — **people** in Field (`contacts.name`); venue names belong on `addresses.address_name` |
 | `RecipientEmail` | string \| null | May contain **multiple emails**, comma-separated |
 | `RecipientPhone` | string \| null | |
 | `TaskCreatedBy` | string | Creator display name (not necessarily a user ID) |
@@ -122,10 +124,10 @@ All nullable in the example — used when pickup location matters.
 
 ## Observations from the Example
 
-1. **`TaskDesc` carries operational detail** — job identifiers, step-by-step directions, door codes, and photo requirements live in one text field. Executors rely heavily on this.
+1. **`TaskDesc` carries operational detail** — job identifiers, step-by-step directions, door codes, and photo requirements live in one text field. Crew members rely heavily on this.
 2. **Photo proof is instruction-driven** — the example says to take a picture of the delivery; there is no separate `PhotoRequired` flag in this record (may exist elsewhere or be implied by task type).
-3. **Destination is populated; dispatch is not** — delivery tasks may only need a destination. Other task types may use dispatch fields.
-4. **Denormalized names** — `DriverName`, `TaskCreatedBy`, `RecipientName` appear alongside IDs. Field may normalize these into related entities; preserve display convenience for executors.
+3. **Destination only** — Field models job-site destination; reference `Dispatch*` is ignored (single fixed origin).
+4. **Denormalized names** — `DriverName`, `TaskCreatedBy`, `RecipientName` appear alongside IDs. Field normalizes these into related entities; UI shows **crew** (not "driver") for the assignee.
 5. **Coordinates are a comma-separated string** — consider parsing/storing as structured lat/lng in Field, but mirror the reference format if integrating with the licensed system.
 6. **Scheduling is a window** — `AfterDateTime` / `BeforeDateTime` define an execution window, not necessarily a single appointment time (`IsTimeSpecific: false` here).
 
@@ -192,20 +194,16 @@ Do not assume absence — these may be separate entities, attachments, or fields
 - Status transition history
 - Line items / materials (e.g. "Stanchion Topper Signs x4" is embedded in `TaskDesc` here)
 - Full list of `TaskType` and `Status` values
-- Team entity (when `AssignedToTeamId` is not `-1`)
-
 ---
 
 ## Relational schema
 
-The flat export above is normalized into related tables for PostgreSQL. See **[`database-design.md`](database-design.md)** for tables, relationships, indexes, MVP subset, and field mapping. System design: **[`sdd.md`](sdd.md)**.
+The flat export above is normalized into related tables for PostgreSQL. See **[`database-design.md`](database-design.md)** for tables, relationships, indexes, MVP subset, and field mapping. System design: **[`sdd.md`](sdd.md)**. Field does **not** model teams — assignment is to a **crew member** only. Do not use "driver" in Field UI or schema names. Field does **not** model dispatch/pickup addresses.
 
 ## Open Questions
 
 - Confirm status transition rules (draft graph in `database-design.md`)
-- When is `Dispatch*` required vs `Destination*` only?
-- Meaning of `AssignedToTeamId: -1` — sentinel for unassigned?
 - Are `Guys` and `Hours` required at creation or optional estimates?
 - How are photos attached on completion — separate API/entity?
-- ~~Should Field normalize `RecipientEmail`?~~ → Yes: `recipient_emails` table (see `database-design.md`)
+- ~~Should Field normalize `RecipientEmail`?~~ → Single `contacts.email`; assign contacts via `task_contacts`
 - MVP subset: which fields are required to create, assign, execute, and complete a task?

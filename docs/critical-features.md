@@ -13,36 +13,40 @@ The system must generate PDF documents tied to tasks. Three document types are c
 | Document | Purpose | Typical timing (TBD) |
 |----------|---------|----------------------|
 | **Shipping label** | Label for physical shipment / load identification | On assign or load (e.g. status → `loaded`) |
-| **Delivery docket** | Instructions and details for the driver / job packet | On assign or before execution |
+| **Delivery docket** | Instructions and details for the crew / job packet | On assign or before execution |
 | **POD** (proof of delivery) | Completion record — may include photos, notes, signature | On task completion |
 
 **Requirements (draft):**
 
 - PDFs are **generated server-side** from task data (and completion data for POD).
 - Store generated files via storage provider — **local `./storage/documents` in dev**; **S3 in production**. Metadata in `task_documents`.
-- Web users can **view and download** PDFs; mobile executors may **view/print** docket and submit data that feeds POD generation.
+- Web users can **view and download** PDFs; mobile crew members may **view/print** docket and submit data that feeds POD generation.
 - POD likely incorporates `task_attachments` (photos) and `completed_notes` / `completed_at`.
+
+**Documented so far:**
+
+- **Delivery docket** layout + field map: [`pdf-delivery-docket.md`](pdf-delivery-docket.md) (from licensed-product sample). Local generator: `npm run pdf:docket`.
 
 **Not yet defined:**
 
 - Exact trigger per document type (status change, manual button, both).
-- PDF layout/templates — need samples from licensed product or brand guidelines.
+- Shipping label and POD PDF layouts (need samples).
 - Whether shipping label integrates with a carrier API or is an internal printable label only.
 
 **Likely implementation:**
 
-- Template-based PDF generation in the API layer (e.g. PDFKit, `@react-pdf/renderer` on server, or HTML → PDF).
+- Template-based PDF generation in the API layer — **PDFKit** for delivery docket MVP (`scripts/generate-delivery-docket.mjs`); wire into API later.
 - One template per document type; version templates as requirements stabilize.
 
 ---
 
 ## 2. Automatic Email Sending
 
-The system must **send emails automatically** without manual copy/paste. Recipients and triggers are tied to tasks.
+The system must **send emails automatically** without manual copy/paste. Contacts and triggers are tied to tasks.
 
 **Known data sources:**
 
-- `recipient_emails` — one or more addresses per recipient (reference used comma-separated emails).
+- `contacts.email` — contact email (via `task_contacts` on the task).
 - Task fields — description, scheduling window, destination, status, links to PDFs.
 
 **Requirements (draft):**
@@ -54,7 +58,7 @@ The system must **send emails automatically** without manual copy/paste. Recipie
 **Not yet defined:**
 
 - Which events trigger which email templates.
-- Whether executors or internal staff receive emails in addition to external recipients.
+- Whether crew members or internal staff receive emails in addition to external contacts.
 - From-address, reply-to, and branding (SES verified domain when on AWS; not required locally)
 
 **Email delivery:**
@@ -70,10 +74,10 @@ Templates: inline in code or DB for MVP. Async dispatch optional locally; SQS + 
 
 | Event | Possible email |
 |-------|------------------|
-| Task assigned | Notify driver (if email on file) or dispatch only |
-| Task loaded | Delivery docket / label to driver or warehouse |
-| Task completed | POD or completion notice to `recipient_emails` |
-| Task failed | Alert to creator / recipient |
+| Task assigned | Notify crew member (if email on file) or dispatch only |
+| Task loaded | Delivery docket / label to crew or warehouse |
+| Task completed | POD or completion notice to assigned contact emails |
+| Task failed | Alert to creator / contact |
 
 ---
 
@@ -93,7 +97,7 @@ PDF generation and email sending are **downstream of task state**. Design status
 These features are **critical**, but template polish and every possible trigger do not all need to ship on day one. Minimum acceptable MVP:
 
 1. At least **one PDF type** generating correctly from real task data.
-2. At least **one automatic email** on a defined event (e.g. completion → recipient).
+2. At least **one automatic email** on a defined event (e.g. completion → contact).
 3. Logging/storage for generated PDFs and sent emails.
 
 Expand to all three PDF types and full trigger matrix once the pipeline works end-to-end.
@@ -102,7 +106,7 @@ Expand to all three PDF types and full trigger matrix once the pipeline works en
 
 ## Open Questions
 
-- Sample PDFs from the licensed product for each document type?
+- Sample PDFs for **shipping label** and standalone **POD** (delivery docket sample captured)?
 - Which email events are mandatory for go-live vs later?
 - Include PDF as attachment, link only, or both?
 - SMS required later, or email only for now?

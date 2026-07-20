@@ -15,6 +15,16 @@ dist-ssr
 .env.*
 !.env.example
 
+# Lambda build artifacts / local downloads
+aws/lambdas/.build
+.tmp-lambdas
+
+# Generated PDFs / uploads (local storage provider)
+storage/documents/*
+!storage/documents/.gitkeep
+storage/attachments/*
+!storage/attachments/.gitkeep
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -25,3 +35,25 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Capacitor / Android (keep android/ tracked; ignore build junk)
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/captures/
+android/.idea/
+android/*.iml
+android/app/*.iml
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Capacitor / iOS (keep ios/ tracked; ignore build junk)
+ios/App/Pods/
+ios/DerivedData/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate

@@ -1,0 +1,11 @@
+{
+  "name": "woo-message-handler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.758.0",
+    "@aws-sdk/client-secrets-manager": "^3.758.0",
+    "pg": "^8.14.1"
+  }
+}
