@@ -15,11 +15,13 @@ function isImageMime(mimeType: string): boolean {
 	return mimeType.startsWith('image/');
 }
 
-function touchDistance(a: Touch, b: Touch): number {
+type TouchPoint = { clientX: number; clientY: number };
+
+function touchDistance(a: TouchPoint, b: TouchPoint): number {
 	return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
-function touchMid(a: Touch, b: Touch): { x: number; y: number } {
+function touchMid(a: TouchPoint, b: TouchPoint): { x: number; y: number } {
 	return {
 		x: (a.clientX + b.clientX) / 2,
 		y: (a.clientY + b.clientY) / 2,
