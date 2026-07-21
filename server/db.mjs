@@ -14,10 +14,22 @@ let cachedPassword = null;
 function getPassword() {
   if (cachedPassword) return cachedPassword;
 
-  if (process.env.DATABASE_URL) {
-    const url = new URL(process.env.DATABASE_URL);
-    cachedPassword = decodeURIComponent(url.password);
+  // Prefer explicit password (avoids URL-encoding issues with special chars).
+  if (process.env.PGPASSWORD) {
+    cachedPassword = process.env.PGPASSWORD;
     return cachedPassword;
+  }
+
+  if (process.env.DATABASE_URL) {
+    try {
+      const url = new URL(process.env.DATABASE_URL);
+      if (url.password) {
+        cachedPassword = decodeURIComponent(url.password);
+        return cachedPassword;
+      }
+    } catch {
+      // Fall through to Secrets Manager if the URL is malformed.
+    }
   }
 
   let raw;

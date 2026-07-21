@@ -3,13 +3,7 @@ import {
 	NavLink as RouterNavLink,
 	useLocation,
 } from 'react-router-dom';
-import {
-	AppShell,
-	NavLink,
-	Text,
-	Box,
-	UnstyledButton,
-} from '@mantine/core';
+import { AppShell, NavLink, Text, Box, UnstyledButton } from '@mantine/core';
 import {
 	ClipboardCheck,
 	ClipboardList,

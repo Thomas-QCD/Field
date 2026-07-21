@@ -1,3 +1,4 @@
+import "./loadEnv.mjs";
 import { createServer } from "node:http";
 import {
   confirmAttachment,

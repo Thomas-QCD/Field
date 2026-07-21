@@ -46,12 +46,19 @@ npx cap add ios
 cp .env.example .env
 ```
 
-1. Sign in to AWS (SSO / whatever this org uses), e.g. `aws login` or `aws sso login`.
-2. Fetch the RDS password from Secrets Manager (command in [`.env.example`](../.env.example)).
-3. Set `DATABASE_URL` in `.env`.
-4. Leave `AWS_REGION=us-west-1` and `S3_BUCKET=field-dev-attachments` as in the example.
+Edit `.env` and set a full `DATABASE_URL` (not empty). Example shape:
+
+```env
+DATABASE_URL=postgresql://field_admin:URL_ENCODED_PASSWORD@field-dev.c9saiusmgamc.us-west-1.rds.amazonaws.com:5432/field
+AWS_REGION=us-west-1
+S3_BUCKET=field-dev-attachments
+```
+
+Ask a teammate for the current password (or Secrets Manager value) so you do not need a working `aws` CLI on the Mac for database access. The API loads `.env` on startup — after editing, restart `npm run dev`.
 
 Your Mac must be able to reach RDS `field-dev` (security group allows your public IP). Ask a teammate if the SG needs updating.
+
+S3 attachments still need AWS credentials later (`aws login` / SSO). Database-only testing does not.
 
 Optional first-time schema (empty tables):
 
