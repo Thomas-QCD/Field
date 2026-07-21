@@ -108,7 +108,7 @@ const columnDefs: ColDef<Task>[] = [
 	},
 ];
 
-export function TasksPage() {
+export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 	const { user } = useCurrentUser();
 	const [newTaskOpen, setNewTaskOpen] = useState(false);
 	const [editingTask, setEditingTask] = useState<TaskDetail | null>(null);
@@ -135,19 +135,32 @@ export function TasksPage() {
 		[tasks, hideDelivery],
 	);
 
-	const refreshTasks = useCallback(async (signal?: AbortSignal) => {
-		setLoading(true);
-		setError(null);
-		try {
-			const next = await listTasks(signal);
-			if (!signal?.aborted) setTasks(next);
-		} catch (err: unknown) {
-			if (err instanceof DOMException && err.name === 'AbortError') return;
-			setError(err instanceof Error ? err.message : 'Failed to load tasks');
-		} finally {
-			if (!signal?.aborted) setLoading(false);
-		}
-	}, []);
+	const crewMemberId = mode === 'mine' ? user?.id ?? null : null;
+
+	const refreshTasks = useCallback(
+		async (signal?: AbortSignal) => {
+			if (mode === 'mine' && !crewMemberId) {
+				setTasks([]);
+				setLoading(false);
+				setError(null);
+				return;
+			}
+			setLoading(true);
+			setError(null);
+			try {
+				const next = await listTasks(signal, {
+					crewMemberId: crewMemberId ?? undefined,
+				});
+				if (!signal?.aborted) setTasks(next);
+			} catch (err: unknown) {
+				if (err instanceof DOMException && err.name === 'AbortError') return;
+				setError(err instanceof Error ? err.message : 'Failed to load tasks');
+			} finally {
+				if (!signal?.aborted) setLoading(false);
+			}
+		},
+		[mode, crewMemberId],
+	);
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -197,11 +210,13 @@ export function TasksPage() {
 		[editingTask],
 	);
 
+	const pageTitle = mode === 'mine' ? 'My Tasks' : 'Tasks';
+
 	return (
 		<Box className='tasks-page'>
 			<Group justify='space-between' mb='md' wrap='nowrap'>
 				<Title order={1} fz={{ base: 'h3', sm: 'h2' }}>
-					Tasks
+					{pageTitle}
 				</Title>
 				<Button
 					variant={hideDelivery ? 'light' : 'default'}
@@ -210,17 +225,25 @@ export function TasksPage() {
 				>
 					{hideDelivery ? 'Show Delivery' : 'Hide Delivery'}
 				</Button>
-				<Button
-					leftSection={<Plus size={18} />}
-					onClick={() => {
-						setEditingTask(null);
-						setNewTaskOpen(true);
-					}}
-					color='brand'
-				>
-					New Task
-				</Button>
+				{mode === 'all' ? (
+					<Button
+						leftSection={<Plus size={18} />}
+						onClick={() => {
+							setEditingTask(null);
+							setNewTaskOpen(true);
+						}}
+						color='brand'
+					>
+						New Task
+					</Button>
+				) : null}
 			</Group>
+
+			{mode === 'mine' && !user ? (
+				<Alert color='yellow' title='Select a user' mb='md'>
+					Choose a crew member in the sidebar to see their assigned tasks.
+				</Alert>
+			) : null}
 
 			{error ? (
 				<Alert color='red' title='Could not load tasks' mb='md'>

@@ -13,7 +13,13 @@ import {
 	Loader,
 	UnstyledButton,
 } from '@mantine/core';
-import { ClipboardList, Contact, MapPinned, UserRound } from 'lucide-react';
+import {
+	ClipboardCheck,
+	ClipboardList,
+	Contact,
+	MapPinned,
+	UserRound,
+} from 'lucide-react';
 import { useCurrentUser } from '../context/CurrentUserContext';
 
 const navLinkStyles = {
@@ -25,7 +31,8 @@ const navLinkStyles = {
 } as const;
 
 const bottomNavItems = [
-	{ to: '/', end: true, label: 'Tasks', icon: ClipboardList },
+	{ to: '/my-tasks', end: false, label: 'My Tasks', icon: ClipboardCheck },
+	{ to: '/tasks', end: false, label: 'Tasks', icon: ClipboardList },
 	{ to: '/contacts', end: false, label: 'Contacts', icon: Contact },
 	{ to: '/addresses', end: false, label: 'Addresses', icon: MapPinned },
 ] as const;
@@ -132,14 +139,24 @@ export function FieldAppShell() {
 				<AppShell.Section grow>
 					<NavLink
 						component={RouterNavLink}
-						to='/'
-						end
-						label='Tasks'
-						leftSection={<ClipboardList size={18} />}
-						active={location.pathname === '/'}
+						to='/my-tasks'
+						label='My Tasks'
+						leftSection={<ClipboardCheck size={18} />}
+						active={location.pathname === '/my-tasks'}
 						color='brand'
 						styles={navLinkStyles}
 						className='field-nav-link'
+					/>
+					<NavLink
+						component={RouterNavLink}
+						to='/tasks'
+						label='Tasks'
+						leftSection={<ClipboardList size={18} />}
+						active={location.pathname === '/tasks'}
+						color='brand'
+						styles={navLinkStyles}
+						className='field-nav-link'
+						mt={4}
 					/>
 					<NavLink
 						component={RouterNavLink}
