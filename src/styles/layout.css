@@ -5,6 +5,13 @@ body,
   margin: 0;
 }
 
+/* Prevent accidental double-tap / pinch page zoom on iOS. Image zoom lives in
+   AttachmentViewer (custom gestures + touch-action: none). */
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
+
 /* Portaled modals read these from :root (AppShell vars stay on .field-app-shell). */
 :root {
   --field-shell-header: 0px;
