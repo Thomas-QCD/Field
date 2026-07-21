@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-	Modal,
 	Stack,
 	Group,
 	Text,
@@ -12,6 +11,7 @@ import {
 } from '@mantine/core';
 import { Pencil, Trash2 } from 'lucide-react';
 import { getAddress, type Address } from '../api/addresses';
+import { KeyboardAwareModal } from './KeyboardAwareModal';
 
 interface AddressDetailModalProps {
 	addressId: number | null;
@@ -108,7 +108,7 @@ export function AddressDetailModal({
 		(addressId != null ? `Address #${addressId}` : 'Address');
 
 	return (
-		<Modal
+		<KeyboardAwareModal
 			opened={opened}
 			onClose={onClose}
 			title={title}
@@ -180,6 +180,6 @@ export function AddressDetailModal({
 					</Group>
 				</Stack>
 			) : null}
-		</Modal>
+		</KeyboardAwareModal>
 	);
 }

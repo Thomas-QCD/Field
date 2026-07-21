@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-	Modal,
 	Stack,
 	Group,
 	Text,
@@ -16,7 +15,9 @@ import {
 } from '@mantine/core';
 import { Pencil, Trash2 } from 'lucide-react';
 import { getTask } from '../api/tasks';
+import { formatShortName } from '../formatName';
 import type { TaskDetail, TaskStatus } from '../types/task';
+import { KeyboardAwareModal } from './KeyboardAwareModal';
 
 interface TaskDetailModalProps {
 	taskId: number | null;
@@ -216,7 +217,7 @@ export function TaskDetailModal({
 				: 'Task';
 
 	return (
-		<Modal
+		<KeyboardAwareModal
 			opened={opened}
 			onClose={onClose}
 			title={
@@ -267,7 +268,9 @@ export function TaskDetailModal({
 							label='Crew'
 							value={
 								task.crewMembers.length
-									? task.crewMembers.map((m) => m.displayName).join(', ')
+									? task.crewMembers
+											.map((m) => formatShortName(m.displayName))
+											.join(', ')
 									: 'Unassigned'
 							}
 						/>
@@ -283,7 +286,7 @@ export function TaskDetailModal({
 								{task.contacts.map((contact) => (
 									<Box key={contact.id}>
 										<Text size='sm' fw={600}>
-											{contact.name}
+											{formatShortName(contact.name)}
 										</Text>
 										{(contact.phone || contact.email) && (
 											<Group gap='md' mt={2}>
@@ -447,6 +450,6 @@ export function TaskDetailModal({
 					</Group>
 				</Stack>
 			) : null}
-		</Modal>
+		</KeyboardAwareModal>
 	);
 }

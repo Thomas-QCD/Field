@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-	Modal,
 	Stack,
 	Group,
 	TextInput,
@@ -31,6 +30,8 @@ import type { TaskType } from '../types/task';
 import { createContact, listContacts } from '../api/contacts';
 import { createAddress, listAddresses } from '../api/addresses';
 import { listCrewUsers } from '../api/users';
+import { formatShortName } from '../formatName';
+import { KeyboardAwareModal } from './KeyboardAwareModal';
 import {
 	NewContactModal,
 	type NewContactFormValues,
@@ -222,9 +223,10 @@ export function NewTaskModal({
 			phone: values.phone.trim() || undefined,
 			email: values.email.trim() || undefined,
 		});
+		const shortName = formatShortName(contact.name);
 		const label = contact.email
-			? `${contact.name} (${contact.email})`
-			: contact.name;
+			? `${shortName} (${contact.email})`
+			: shortName;
 		setContactOptions((prev) => {
 			if (prev.some((o) => o.value === String(contact.id))) return prev;
 			return [...prev, { value: String(contact.id), label }];
@@ -310,7 +312,10 @@ export function NewTaskModal({
 		listCrewUsers(controller.signal)
 			.then((users) => {
 				setCrewOptions(
-					users.map((u) => ({ value: u.id, label: u.displayName })),
+					users.map((u) => ({
+						value: u.id,
+						label: formatShortName(u.displayName),
+					})),
 				);
 			})
 			.catch((err: unknown) => {
@@ -325,10 +330,13 @@ export function NewTaskModal({
 		listContacts(controller.signal)
 			.then((contacts) => {
 				setContactOptions(
-					contacts.map((c) => ({
-						value: String(c.id),
-						label: c.email ? `${c.name} (${c.email})` : c.name,
-					})),
+					contacts.map((c) => {
+						const shortName = formatShortName(c.name);
+						return {
+							value: String(c.id),
+							label: c.email ? `${shortName} (${c.email})` : shortName,
+						};
+					}),
 				);
 			})
 			.catch((err: unknown) => {
@@ -365,7 +373,7 @@ export function NewTaskModal({
 	}, [opened]);
 
 	return (
-		<Modal
+		<KeyboardAwareModal
 			opened={opened}
 			onClose={handleClose}
 			title={isEdit ? 'Edit Task' : 'New Task'}
@@ -745,6 +753,6 @@ export function NewTaskModal({
 				onSave={handleCreateAddress}
 				zIndex={400}
 			/>
-		</Modal>
+		</KeyboardAwareModal>
 	);
 }

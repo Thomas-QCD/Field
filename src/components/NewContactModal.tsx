@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-	Modal,
 	Stack,
 	Group,
 	TextInput,
@@ -8,6 +7,7 @@ import {
 	Alert,
 } from '@mantine/core';
 import { Mail, Phone, Save, UserRound, X, Plus } from 'lucide-react';
+import { KeyboardAwareModal } from './KeyboardAwareModal';
 
 export interface NewContactFormValues {
 	name: string;
@@ -103,7 +103,7 @@ export function NewContactModal({
 	};
 
 	return (
-		<Modal
+		<KeyboardAwareModal
 			opened={opened}
 			onClose={handleClose}
 			title={isEdit ? 'Edit Contact' : 'New Contact'}
@@ -187,6 +187,6 @@ export function NewContactModal({
 					</Button>
 				</Group>
 			</Stack>
-		</Modal>
+		</KeyboardAwareModal>
 	);
 }

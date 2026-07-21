@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-	Modal,
 	Stack,
 	Group,
 	Text,
@@ -12,6 +11,7 @@ import {
 } from '@mantine/core';
 import { Pencil, Trash2 } from 'lucide-react';
 import { getContact, type Contact } from '../api/contacts';
+import { KeyboardAwareModal } from './KeyboardAwareModal';
 
 interface ContactDetailModalProps {
 	contactId: number | null;
@@ -104,7 +104,7 @@ export function ContactDetailModal({
 	const title = contact?.name || (contactId != null ? `Contact #${contactId}` : 'Contact');
 
 	return (
-		<Modal
+		<KeyboardAwareModal
 			opened={opened}
 			onClose={onClose}
 			title={title}
@@ -171,6 +171,6 @@ export function ContactDetailModal({
 					</Group>
 				</Stack>
 			) : null}
-		</Modal>
+		</KeyboardAwareModal>
 	);
 }

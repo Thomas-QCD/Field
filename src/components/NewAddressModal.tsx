@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-	Modal,
 	Stack,
 	Group,
 	TextInput,
@@ -9,6 +8,7 @@ import {
 	Alert,
 } from '@mantine/core';
 import { Building2, MapPin, Save, StickyNote, X, Plus } from 'lucide-react';
+import { KeyboardAwareModal } from './KeyboardAwareModal';
 
 export interface NewAddressFormValues {
 	addressName: string;
@@ -110,7 +110,7 @@ export function NewAddressModal({
 	};
 
 	return (
-		<Modal
+		<KeyboardAwareModal
 			opened={opened}
 			onClose={handleClose}
 			title={isEdit ? 'Edit Address' : 'New Address'}
@@ -205,6 +205,6 @@ export function NewAddressModal({
 					</Button>
 				</Group>
 			</Stack>
-		</Modal>
+		</KeyboardAwareModal>
 	);
 }
