@@ -5,16 +5,14 @@ import {
 } from 'react-router-dom';
 import {
 	AppShell,
-	Burger,
 	Group,
 	NavLink,
 	Text,
 	Box,
 	Select,
 	Loader,
+	UnstyledButton,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
-import { Capacitor } from '@capacitor/core';
 import { ClipboardList, Contact, MapPinned, UserRound } from 'lucide-react';
 import { useCurrentUser } from '../context/CurrentUserContext';
 
@@ -26,18 +24,19 @@ const navLinkStyles = {
 	label: { fontWeight: 500 },
 } as const;
 
-const isNative = Capacitor.isNativePlatform();
-const nativePlatformLabel =
-	Capacitor.getPlatform() === 'ios'
-		? 'iOS'
-		: Capacitor.getPlatform() === 'android'
-			? 'Android'
-			: Capacitor.getPlatform();
+const bottomNavItems = [
+	{ to: '/', end: true, label: 'Tasks', icon: ClipboardList },
+	{ to: '/contacts', end: false, label: 'Contacts', icon: Contact },
+	{ to: '/addresses', end: false, label: 'Addresses', icon: MapPinned },
+] as const;
 
-export function FieldAppShell() {
-	const [mobileOpened, { toggle: toggleMobile, close: closeMobile }] =
-		useDisclosure();
-	const location = useLocation();
+function isNavActive(pathname: string, to: string, end: boolean) {
+	return end
+		? pathname === to
+		: pathname === to || pathname.startsWith(`${to}/`);
+}
+
+function UserSelect() {
 	const { user, users, loading, setUserId } = useCurrentUser();
 
 	const userOptions = users.map((u) => ({
@@ -45,65 +44,77 @@ export function FieldAppShell() {
 		label: u.displayName,
 	}));
 
-	const headerHeight = isNative ? 88 : 56;
+	return (
+		<Select
+			size='sm'
+			data={userOptions}
+			value={user?.id ?? null}
+			onChange={(id) => setUserId(id)}
+			placeholder={loading ? 'Loading…' : 'Select user'}
+			searchable
+			leftSection={
+				loading ? <Loader size={14} color='gray' /> : <UserRound size={16} />
+			}
+			nothingFoundMessage='No users'
+			comboboxProps={{ withinPortal: true, shadow: 'md' }}
+			classNames={{
+				input: 'field-user-select-input',
+				dropdown: 'field-user-select-dropdown',
+				option: 'field-user-select-option',
+			}}
+			aria-label='Current user'
+		/>
+	);
+}
+
+export function FieldAppShell() {
+	const location = useLocation();
 
 	return (
 		<AppShell
 			padding='md'
 			layout='alt'
-			header={{ height: headerHeight }}
+			header={{ height: 56 }}
+			footer={{ height: 64 }}
 			navbar={{
 				width: 240,
 				breakpoint: 'sm',
-				collapsed: { mobile: !mobileOpened },
+				collapsed: { mobile: true },
 			}}
 			className='field-app-shell'
 			styles={{
 				navbar: {
 					background: 'var(--color-sidebar)',
 					borderRight: 'none',
+					zIndex: 202,
 				},
 				header: {
 					background: 'rgb(245 245 245 / 92%)',
 					backdropFilter: 'blur(8px)',
 					zIndex: 201,
 				},
+				footer: {
+					background: 'var(--color-sidebar)',
+					borderTop: 'none',
+					zIndex: 201,
+				},
 				main: {
 					background: 'transparent',
-					minHeight: '100dvh',
 				},
 			}}
 		>
 			<AppShell.Header>
-				{isNative && (
-					<Box
-						bg='var(--mantine-color-brand-6)'
-						c='white'
-						px='md'
-						py={6}
-						style={{ textAlign: 'center' }}
-					>
-						<Text fw={600} fz='sm'>
-							Hello Field — {nativePlatformLabel}
-						</Text>
-					</Box>
-				)}
-				<Group h={56} gap='sm' px='md'>
-					<Burger
-						opened={mobileOpened}
-						onClick={toggleMobile}
-						hiddenFrom='sm'
-						size='sm'
-						color='dark'
-						aria-label='Toggle navigation'
-					/>
+				<Group h={56} gap='sm' px='md' justify='space-between' wrap='nowrap'>
 					<Text fw={700} fz='lg' style={{ fontFamily: 'var(--font-display)' }}>
 						Field
 					</Text>
+					<Box hiddenFrom='sm' maw='58%' className='field-header-user-select'>
+						<UserSelect />
+					</Box>
 				</Group>
 			</AppShell.Header>
 
-			<AppShell.Navbar p='md'>
+			<AppShell.Navbar p='md' visibleFrom='sm'>
 				<AppShell.Section mb='md'>
 					<Text
 						c='gray.1'
@@ -113,7 +124,6 @@ export function FieldAppShell() {
 							fontFamily: 'var(--font-display)',
 							letterSpacing: '-0.02em',
 						}}
-						visibleFrom='sm'
 					>
 						Field
 					</Text>
@@ -126,7 +136,6 @@ export function FieldAppShell() {
 						end
 						label='Tasks'
 						leftSection={<ClipboardList size={18} />}
-						onClick={closeMobile}
 						active={location.pathname === '/'}
 						color='brand'
 						styles={navLinkStyles}
@@ -137,7 +146,6 @@ export function FieldAppShell() {
 						to='/contacts'
 						label='Contacts'
 						leftSection={<Contact size={18} />}
-						onClick={closeMobile}
 						active={location.pathname === '/contacts'}
 						color='brand'
 						styles={navLinkStyles}
@@ -149,7 +157,6 @@ export function FieldAppShell() {
 						to='/addresses'
 						label='Addresses'
 						leftSection={<MapPinned size={18} />}
-						onClick={closeMobile}
 						active={location.pathname === '/addresses'}
 						color='brand'
 						styles={navLinkStyles}
@@ -169,30 +176,34 @@ export function FieldAppShell() {
 					>
 						Signed in as
 					</Text>
-					<Select
-						size='sm'
-						data={userOptions}
-						value={user?.id ?? null}
-						onChange={(id) => setUserId(id)}
-						placeholder={loading ? 'Loading…' : 'Select user'}
-						searchable
-						leftSection={
-							loading ? <Loader size={14} color='gray' /> : <UserRound size={16} />
-						}
-						nothingFoundMessage='No users'
-						comboboxProps={{ withinPortal: true, shadow: 'md' }}
-						classNames={{
-							input: 'field-user-select-input',
-							dropdown: 'field-user-select-dropdown',
-							option: 'field-user-select-option',
-						}}
-						aria-label='Current user'
-					/>
+					<UserSelect />
 				</AppShell.Section>
 			</AppShell.Navbar>
 
+			<AppShell.Footer hiddenFrom='sm' className='field-bottom-nav'>
+				<nav className='field-bottom-nav-inner' aria-label='Main'>
+					{bottomNavItems.map(({ to, end, label, icon: Icon }) => {
+						const active = isNavActive(location.pathname, to, end);
+						return (
+							<UnstyledButton
+								key={to}
+								component={RouterNavLink}
+								to={to}
+								end={end}
+								className='field-bottom-nav-item'
+								data-active={active || undefined}
+								aria-current={active ? 'page' : undefined}
+							>
+								<Icon size={22} strokeWidth={active ? 2.25 : 2} aria-hidden />
+								<span>{label}</span>
+							</UnstyledButton>
+						);
+					})}
+				</nav>
+			</AppShell.Footer>
+
 			<AppShell.Main>
-				<Box>
+				<Box className='field-main-content'>
 					<Outlet />
 				</Box>
 			</AppShell.Main>

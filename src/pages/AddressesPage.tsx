@@ -29,27 +29,27 @@ const columnDefs: ColDef<Address>[] = [
 		field: 'addressName',
 		headerName: 'Name',
 		valueFormatter: emptyDash,
-		minWidth: 180,
+		minWidth: 100,
 		flex: 1.2,
 	},
 	{
 		field: 'streetLine',
 		headerName: 'Street',
-		minWidth: 200,
+		minWidth: 120,
 		flex: 1.4,
 	},
 	{
 		field: 'building',
 		headerName: 'Building',
 		valueFormatter: emptyDash,
-		minWidth: 140,
+		minWidth: 80,
 		flex: 0.8,
 	},
 	{
 		field: 'notes',
 		headerName: 'Notes',
 		valueFormatter: emptyDash,
-		minWidth: 180,
+		minWidth: 100,
 		flex: 1.2,
 	},
 ];
@@ -179,8 +179,11 @@ export function AddressesPage() {
 							getRowId={(p) => String(p.data.id)}
 							animateRows
 							suppressCellFocus
+							suppressHorizontalScroll
 							rowStyle={{ cursor: 'pointer' }}
 							onRowClicked={handleRowClicked}
+							onGridSizeChanged={(e) => e.api.sizeColumnsToFit()}
+							onFirstDataRendered={(e) => e.api.sizeColumnsToFit()}
 						/>
 					</AgGridProvider>
 				)}

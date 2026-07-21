@@ -17,6 +17,7 @@ import {
 	type NewTaskFormValues,
 } from '../components/NewTaskModal';
 import { TaskDetailModal } from '../components/TaskDetailModal';
+import { formatShortNameList } from '../formatName';
 
 function StatusCell({ value }: ICellRendererParams<Task, TaskStatus>) {
 	if (!value) return null;
@@ -67,41 +68,43 @@ const columnDefs: ColDef<Task>[] = [
 		headerName: 'Job',
 		valueFormatter: (p: ValueFormatterParams<Task, string>) =>
 			p.value ? `#${p.value}` : '',
-		minWidth: 50,
+		minWidth: 56,
 		flex: 0.6,
 	},
 	{
 		field: 'taskType',
 		headerName: 'Type',
-		minWidth: 110,
+		minWidth: 72,
 		flex: 0.6,
 	},
 	{
 		field: 'status',
 		headerName: 'Status',
 		cellRenderer: StatusCell,
-		minWidth: 120,
+		minWidth: 88,
 		flex: 0.6,
 	},
 	{
 		field: 'crewName',
 		headerName: 'Crew',
 		valueFormatter: (p: ValueFormatterParams<Task, string | null>) =>
-			p.value ?? 'Unassigned',
-		minWidth: 140,
+			p.value ? formatShortNameList(p.value) : 'Unassigned',
+		minWidth: 88,
 		flex: 1,
 	},
 	{
 		field: 'destinationAddress',
 		headerName: 'Destination',
-		minWidth: 220,
-		flex: 1.0,
+		minWidth: 120,
+		flex: 1.2,
 	},
 	{
 		field: 'contactNames',
 		headerName: 'Contacts',
-		minWidth: 160,
-		flex: 1.2,
+		valueFormatter: (p: ValueFormatterParams<Task, string>) =>
+			p.value ? formatShortNameList(p.value) : '',
+		minWidth: 88,
+		flex: 1,
 	},
 ];
 
@@ -239,8 +242,11 @@ export function TasksPage() {
 							getRowId={(p) => String(p.data.id)}
 							animateRows
 							suppressCellFocus
+							suppressHorizontalScroll
 							rowStyle={{ cursor: 'pointer' }}
 							onRowClicked={handleRowClicked}
+							onGridSizeChanged={(e) => e.api.sizeColumnsToFit()}
+							onFirstDataRendered={(e) => e.api.sizeColumnsToFit()}
 						/>
 					</AgGridProvider>
 				)}

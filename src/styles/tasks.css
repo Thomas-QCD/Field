@@ -1,8 +1,9 @@
 .tasks-page {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - var(--app-shell-header-offset, 0px) - 2 * var(--mantine-spacing-md));
-  min-height: 20rem;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 }
 
 .tasks-grid-wrap {
@@ -31,9 +32,29 @@
   --ag-secondary-foreground-color: var(--color-text-muted);
 }
 
+.tasks-grid-wrap,
+.tasks-grid-wrap > div,
+.tasks-grid-wrap .ag-root-wrapper {
+  height: 100%;
+}
+
 .tasks-grid-wrap .ag-root-wrapper {
   border: none;
   border-radius: var(--radius);
+}
+
+/* Horizontal scrollbar takes layout space and shortens vertical scroll by the
+   same amount, clipping the last row. Keep H-scroll usable but overlaid. */
+.tasks-grid-wrap .ag-body-horizontal-scroll {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+}
+
+.tasks-grid-wrap .ag-body-vertical-scroll {
+  bottom: 0 !important;
 }
 
 .tasks-grid-wrap .ag-row {
@@ -71,8 +92,8 @@
 }
 
 .task-status[data-status='Cancelled'] {
-	background: #f1f3f5;
-	color: #495057;
+  background: #f1f3f5;
+  color: #495057;
 }
 
 .task-status[data-status='Failed'] {

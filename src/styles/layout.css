@@ -31,6 +31,16 @@ body {
   color: var(--color-text-on-dark) !important;
 }
 
+.field-header-user-select .field-user-select-input {
+  background: var(--color-surface-raised) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text) !important;
+}
+
+.field-header-user-select .field-user-select-input::placeholder {
+  color: var(--color-text-muted);
+}
+
 .field-user-select-input::placeholder {
   color: var(--color-text-on-dark-muted);
 }
@@ -49,29 +59,96 @@ body {
   background: var(--color-sidebar-active);
 }
 
-/* Keep navbar at fixed sidebar width on mobile (Mantine defaults to 100%).
-   Sit below the header so nav items aren't tucked underneath. */
+.field-bottom-nav-inner {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  height: 100%;
+  width: 100%;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.field-bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  height: 100%;
+  min-width: 0;
+  padding: 0.35rem 0.25rem;
+  color: var(--color-text-on-dark-muted);
+  text-decoration: none;
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.1;
+  text-align: center;
+  border-radius: 0;
+}
+
+.field-bottom-nav-item span {
+  display: block;
+  width: 100%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.field-bottom-nav-item[data-active] {
+  color: var(--color-text-on-dark);
+}
+
+.field-bottom-nav-item:active {
+  background: var(--color-sidebar-hover);
+}
+
+/* Fill the AppShell main area so grids size to visible space (not under the footer). */
+.field-app-shell .mantine-AppShell-main {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.field-main-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+/* Mobile: sidebar stays collapsed; bottom footer is the primary nav. */
 @media (max-width: 47.99em) {
   .field-app-shell {
-    --app-shell-navbar-width: var(--sidebar-width) !important;
     --app-shell-navbar-offset: 0px !important;
     --app-shell-header-offset: var(--app-shell-header-height, 56px);
+    --app-shell-footer-height: calc(64px + env(safe-area-inset-bottom, 0px));
+    --app-shell-footer-offset: var(--app-shell-footer-height);
   }
 
   .field-app-shell .mantine-AppShell-navbar {
-    top: var(--app-shell-header-height, 56px);
-    height: calc(100dvh - var(--app-shell-header-height, 56px));
+    display: none !important;
+  }
+
+  .field-app-shell .mantine-AppShell-footer {
+    height: var(--app-shell-footer-height) !important;
   }
 }
 
-/* Desktop: permanent sidebar — hide the mobile top header. */
+/* Desktop: permanent sidebar — hide the mobile top header and bottom nav. */
 @media (min-width: 48em) {
   .field-app-shell {
     --app-shell-header-offset: 0px !important;
     --app-shell-header-height: 0px !important;
+    --app-shell-footer-offset: 0px !important;
+    --app-shell-footer-height: 0px !important;
   }
 
-  .field-app-shell .mantine-AppShell-header {
+  .field-app-shell .mantine-AppShell-header,
+  .field-app-shell .mantine-AppShell-footer {
     display: none !important;
   }
 }

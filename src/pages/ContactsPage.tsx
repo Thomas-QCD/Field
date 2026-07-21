@@ -28,21 +28,21 @@ const columnDefs: ColDef<Contact>[] = [
 	{
 		field: 'name',
 		headerName: 'Contact',
-		minWidth: 180,
+		minWidth: 100,
 		flex: 1.2,
 	},
 	{
 		field: 'phone',
 		headerName: 'Phone',
 		valueFormatter: emptyDash,
-		minWidth: 130,
+		minWidth: 88,
 		flex: 0.8,
 	},
 	{
 		field: 'email',
 		headerName: 'Email',
 		valueFormatter: emptyDash,
-		minWidth: 180,
+		minWidth: 100,
 		flex: 1.2,
 	},
 ];
@@ -170,8 +170,11 @@ export function ContactsPage() {
 							getRowId={(p) => String(p.data.id)}
 							animateRows
 							suppressCellFocus
+							suppressHorizontalScroll
 							rowStyle={{ cursor: 'pointer' }}
 							onRowClicked={handleRowClicked}
+							onGridSizeChanged={(e) => e.api.sizeColumnsToFit()}
+							onFirstDataRendered={(e) => e.api.sizeColumnsToFit()}
 						/>
 					</AgGridProvider>
 				)}
