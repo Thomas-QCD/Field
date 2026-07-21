@@ -443,7 +443,7 @@ async function listUsers(role) {
   }
 
   const { rows } = await pool.query(
-    `SELECT id, display_name
+    `SELECT id, display_name, role
      FROM users
      WHERE is_active = true
        ${roleClause}
@@ -454,11 +454,31 @@ async function listUsers(role) {
   return rows.map((row) => ({
     id: String(row.id),
     displayName: row.display_name,
+    role: row.role,
   }));
 }
 
-async function listTasks() {
+/**
+ * @param {{ crewMemberId?: string | null }} [opts]
+ */
+async function listTasks(opts = {}) {
   const pool = getPool();
+  const crewMemberId =
+    typeof opts.crewMemberId === "string" && opts.crewMemberId.trim()
+      ? opts.crewMemberId.trim()
+      : null;
+  const params = [];
+  let crewClause = "";
+  if (crewMemberId) {
+    params.push(crewMemberId);
+    crewClause = `AND EXISTS (
+         SELECT 1
+         FROM task_crew_members tcm_filter
+         WHERE tcm_filter.task_id = t.id
+           AND tcm_filter.user_id = $${params.length}
+       )`;
+  }
+
   const { rows } = await pool.query(
     `SELECT
        t.id,
@@ -488,7 +508,9 @@ async function listTasks() {
      FROM tasks t
      LEFT JOIN addresses a ON a.id = t.destination_address_id
      WHERE t.deleted_at IS NULL
+       ${crewClause}
      ORDER BY t.created_at DESC, t.id DESC`,
+    params,
   );
 
   return rows.map((row) => ({
@@ -706,7 +728,9 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/tasks") {
-      const tasks = await listTasks();
+      const crewMemberId =
+        (url.searchParams.get("crewMemberId") ?? "").trim() || null;
+      const tasks = await listTasks({ crewMemberId });
       sendJson(res, { tasks });
       return;
     }

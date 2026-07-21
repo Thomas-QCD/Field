@@ -3,6 +3,7 @@ import { apiFetch } from './client';
 export interface AppUser {
 	id: string;
 	displayName: string;
+	role: string;
 }
 
 export type CrewUser = AppUser;

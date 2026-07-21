@@ -1,8 +1,14 @@
 import type { Task, TaskDetail, TaskStatus, TaskType } from '../types/task';
 import { apiFetch } from './client';
 
-export async function listTasks(signal?: AbortSignal): Promise<Task[]> {
-	const res = await apiFetch('/api/tasks', { signal });
+export async function listTasks(
+	signal?: AbortSignal,
+	opts?: { crewMemberId?: string | null },
+): Promise<Task[]> {
+	const params = new URLSearchParams();
+	if (opts?.crewMemberId) params.set('crewMemberId', opts.crewMemberId);
+	const qs = params.toString();
+	const res = await apiFetch(`/api/tasks${qs ? `?${qs}` : ''}`, { signal });
 	const data = (await res.json().catch(() => ({}))) as {
 		tasks?: Task[];
 		error?: string;
