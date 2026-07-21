@@ -71,7 +71,6 @@ body {
   grid-template-columns: repeat(5, 1fr);
   height: 100%;
   width: 100%;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .field-bottom-nav-item {
@@ -109,7 +108,9 @@ body {
   background: var(--color-sidebar-hover);
 }
 
-/* Fill the AppShell main area so grids size to visible space (not under the footer). */
+/* Fill the AppShell main area so grids size to visible space (not under the footer).
+   Top safe-area clears the iOS status bar / notch (Android uses Capacitor
+   adjustMarginsForEdgeToEdge, where these env values are typically 0). */
 .field-app-shell .mantine-AppShell-main {
   display: flex;
   flex-direction: column;
@@ -117,6 +118,10 @@ body {
   min-height: 0;
   height: 100dvh;
   overflow: hidden;
+  padding-top: calc(
+    var(--app-shell-header-offset, 0rem) + var(--app-shell-padding) +
+      env(safe-area-inset-top, 0px)
+  );
 }
 
 .field-main-content {
@@ -130,7 +135,8 @@ body {
 /* Mobile: sidebar stays collapsed; bottom footer is the primary nav. */
 @media (max-width: 47.99em) {
   :root {
-    --field-shell-header: 0px;
+    /* No app header; reserve status-bar / notch for portaled modals. */
+    --field-shell-header: env(safe-area-inset-top, 0px);
     --field-shell-footer: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -138,16 +144,14 @@ body {
     --app-shell-navbar-offset: 0px !important;
     --app-shell-header-offset: 0px !important;
     --app-shell-header-height: 0px !important;
-    --app-shell-footer-height: calc(64px + env(safe-area-inset-bottom, 0px));
-    --app-shell-footer-offset: var(--app-shell-footer-height);
+    /* Base tab height only — Mantine adds env(safe-area-inset-bottom) to
+       footer height/padding. Offset must include it so main clears the bar. */
+    --app-shell-footer-height: 64px;
+    --app-shell-footer-offset: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 
   .field-app-shell .mantine-AppShell-navbar {
     display: none !important;
-  }
-
-  .field-app-shell .mantine-AppShell-footer {
-    height: var(--app-shell-footer-height) !important;
   }
 }
 
