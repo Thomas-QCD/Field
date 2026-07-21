@@ -115,7 +115,7 @@ Android and iOS apps are delivered by wrapping the **same built web app** in a n
 
 - **React + TypeScript** for all client UI.
 - **Capacitor** for iOS and Android — private internal distribution; QR activation (not Cognito).
-- Capacitor 7 is scaffolded (`android/`, `ios/`); use `npm run cap:sync` after web changes. QR activation comes later.
+- Capacitor 7 is scaffolded (`android/`, `ios/`). Day-to-day: `npm run cap:live` (WebView → Vite hot reload) with `npm run dev`; bundled: `npm run cap:sync`. QR activation comes later.
 - Structure routing so web-only routes (login, create task, task board) are gated; mobile crew routes require an active device session (or show QR activation when deactivated).
 
 ## Development environment
@@ -224,7 +224,7 @@ There is an existing licensed FWM product that serves as the functional referenc
 - **Run locally:** `npm install && npm run dev` → http://localhost:5173 (API on `:3000`)
 - **Stop / restart dev servers:** `npm run dev:stop` frees ports 3000 + 5173; `npm run dev:restart` stops then starts. Prefer these over hunting PIDs.
 - **Agent rule for servers:** Prefer one shared `npm run dev`. Before starting API/Vite, run `npm run dev:stop` (or rely on `npm run dev`, which frees those ports first). Do not leave orphan `node server/index.mjs` / `vite` processes; use `dev:stop` when done verifying.
-- **Mobile (Capacitor):** `npm run cap:sync` / `cap:android` / `cap:ios` — see [`README.md`](README.md) Mobile section.
+- **Mobile (Capacitor):** `npm run cap:live` (hot reload) / `cap:sync` / `cap:android` / `cap:ios` — see [`README.md`](README.md) Mobile section.
 - **Delivery docket PDF:** `npm run pdf:docket` → `storage/documents/`
 - **Import venues:** `npm run db:import-addresses` (CSV Name → `addresses.address_name`)
 - **Import people contacts:** `npm run db:import-contacts` (people only — not the venue CSV)
@@ -243,7 +243,7 @@ Master design in [`docs/sdd.md`](docs/sdd.md); proceed with MVP vertical slices.
 
 - React + TypeScript + Vite web app exists at repo root (`npm run dev`).
 - App shell: mobile-first hamburger + left sidebar; Tasks / Contacts / Addresses pages.
-- **Capacitor 7** scaffolding present (`android/`, `ios/`, `capacitor.config.ts`) — Phase 1 hello world; run `npm run cap:android` / `npm run cap:ios`. QR activation not implemented yet.
+- **Capacitor 7** scaffolding present (`android/`, `ios/`, `capacitor.config.ts`) — run `npm run cap:android` / `npm run cap:ios`. QR activation not implemented yet.
 - Follow [`docs/sdd.md`](docs/sdd.md); implement MVP slices vertically.
 - Do not add dependencies, modules, or abstractions without clear MVP justification.
 - Build mobile-responsive web UI; Capacitor native projects are ready for local device/simulator testing.

@@ -29,18 +29,22 @@ Writes `storage/documents/delivery-docket-{taskId}.pdf` from `scripts/fixtures/s
 
 ### Mobile (Capacitor)
 
-The same Vite build runs inside a Capacitor shell (`app.field.mobile`). Native builds show a **Hello Field — Android/iOS** banner so you can confirm the WebView.
+The same Vite build runs inside a Capacitor shell (`app.field.mobile`).
 
 ```bash
-npm run cap:sync      # build web → copy into android/ and ios/
+npm run cap:live      # point WebView at Vite (hot reload) — emulator default
+npm run cap:live -- device   # same, using this PC’s LAN IP (physical device)
+npm run cap:sync      # production-style: build web → copy into android/ and ios/
 npm run cap:android   # sync + open Android Studio
 npm run cap:ios       # sync + open Xcode (macOS only)
 ```
 
-**Android Studio (this machine)** — Install Android Studio + an AVD (API 24+). Keep the host API up (`aws login` on this PC if RDS secrets expired, then `npm run dev`). Run `npm run cap:android`, then Run on an emulator. Expect Field UI + **Hello Field — Android**. The emulator reaches the host API at `10.0.2.2:3000` (you do not run AWS login inside the emulator).
+**Live reload (day-to-day)** — Keep `npm run dev` running, then `npm run cap:live` once and Run from Android Studio. UI edits hot-reload in the emulator; no `cap:sync` per change. Physical device: `npm run cap:live -- device` (same Wi‑Fi as the PC; allow Node through Windows Firewall if prompted). To ship/test bundled assets again, run `npm run cap:sync` (clears the live-reload URL).
 
-**Physical Android device** — Enable Developer options + USB debugging, connect the device, select it in Android Studio, Run. Same Hello banner confirms the native shell. For API access, rebuild with your PC’s LAN IP, e.g. `VITE_API_BASE=http://192.168.x.x:3000 npm run cap:sync`.
+**Android Studio (this machine)** — Install Android Studio + an AVD (API 24+). Keep the host API up (`aws login` on this PC if RDS secrets expired, then `npm run dev`). Prefer `cap:live` for iteration, or `npm run cap:android` for a bundled build. Bundled builds reach the host API at `10.0.2.2:3000` (you do not run AWS login inside the emulator).
 
-**iOS Simulator (iMac)** — iOS cannot be built on Windows. On the Mac: clone/pull, `npm install`, `npm run cap:sync` (runs `pod install` via CocoaPods), then `npm run cap:ios` or open `ios/App/App.xcworkspace` in Xcode. Pick an iPhone simulator → Run. Expect **Hello Field — iOS**.
+**Physical Android device** — Enable Developer options + USB debugging, connect the device, select it in Android Studio, Run. Live reload: `npm run cap:live -- device`. Bundled build API: `VITE_API_BASE=http://192.168.x.x:3000 npm run cap:sync`.
+
+**iOS Simulator (iMac)** — iOS cannot be built on Windows. On the Mac: clone/pull, `npm install`, `npm run cap:sync` (runs `pod install` via CocoaPods), then `npm run cap:ios` or open `ios/App/App.xcworkspace` in Xcode. Pick an iPhone simulator → Run. For live reload on simulator, set `CAP_SERVER_URL=http://127.0.0.1:5173` before `npm run cap:live`.
 
 If `ios/` is missing on the Mac, run `npx cap add ios` once and commit it.

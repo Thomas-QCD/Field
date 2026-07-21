@@ -8,34 +8,61 @@ const PORT = 5432;
 const DATABASE = "field";
 const USER = "field_admin";
 
+/** @type {string | null} */
+let cachedPassword = null;
+
 function getPassword() {
+  if (cachedPassword) return cachedPassword;
+
   if (process.env.DATABASE_URL) {
     const url = new URL(process.env.DATABASE_URL);
-    return decodeURIComponent(url.password);
+    cachedPassword = decodeURIComponent(url.password);
+    return cachedPassword;
   }
 
-  const raw = execFileSync(
-    "aws",
-    [
-      "secretsmanager",
-      "get-secret-value",
-      "--region",
-      "us-west-1",
-      "--secret-id",
-      SECRET_ARN,
-      "--query",
-      "SecretString",
-      "--output",
-      "text",
-    ],
-    { encoding: "utf8" },
-  ).trim();
+  let raw;
+  try {
+    raw = execFileSync(
+      "aws",
+      [
+        "secretsmanager",
+        "get-secret-value",
+        "--region",
+        "us-west-1",
+        "--secret-id",
+        SECRET_ARN,
+        "--query",
+        "SecretString",
+        "--output",
+        "text",
+      ],
+      { encoding: "utf8" },
+    ).trim();
+  } catch (err) {
+    const detail =
+      err && typeof err === "object" && "stderr" in err
+        ? String(err.stderr).trim()
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    const expired = /session has expired|reauthenticate|Unable to locate credentials|ExpiredToken/i.test(
+      detail,
+    );
+    const error = new Error(
+      expired
+        ? "AWS session expired — run `aws login`, then retry."
+        : `Failed to fetch RDS password from Secrets Manager: ${detail || "unknown error"}`,
+    );
+    error.status = 503;
+    throw error;
+  }
 
   const parsed = JSON.parse(raw);
   if (!parsed.password) {
     throw new Error("Secrets Manager payload missing password");
   }
-  return parsed.password;
+  cachedPassword = parsed.password;
+  return cachedPassword;
 }
 
 /** @type {pg.Pool | null} */

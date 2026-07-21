@@ -41,7 +41,12 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
 				});
 			})
 			.catch((err: unknown) => {
-				if (err instanceof DOMException && err.name === 'AbortError') return;
+				if (
+					(err instanceof DOMException || err instanceof Error) &&
+					err.name === 'AbortError'
+				) {
+					return;
+				}
 				console.error(err);
 				setUsers([]);
 			})
