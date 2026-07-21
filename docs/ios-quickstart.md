@@ -87,11 +87,13 @@ Preferred loop: Vite hot reload inside the native WebView.
 npm run dev
 ```
 
-**Terminal 2** — point Capacitor at localhost Vite (do **not** use the default Android `10.0.2.2` URL):
+**Terminal 2** — point Capacitor at localhost Vite (syncs **ios only**; do **not** use the default Android `10.0.2.2` URL):
 
 ```bash
-CAP_SERVER_URL=http://127.0.0.1:5173 npm run cap:live
+npm run cap:live -- ios
 ```
+
+(`CAP_SERVER_URL=http://127.0.0.1:5173` is set for you. Override only if needed.)
 
 Then open Xcode and Run:
 
@@ -132,11 +134,13 @@ To leave live-reload mode and return to bundled assets, run `npm run cap:sync`.
 
 ```bash
 npm run dev
-npm run cap:live -- device
+npm run cap:live -- ios
+# or, if not on the same machine loopback:
+CAP_SERVER_URL=http://$(ipconfig getifaddr en0):5173 npm run cap:live -- ios
 npx cap open ios
 ```
 
-`cap:live -- device` uses the Mac’s LAN IP for Vite. Run and select the phone in Xcode.
+Use the Mac’s LAN IP for Vite when the phone cannot reach `127.0.0.1`. Run and select the phone in Xcode.
 
 **Bundled build** (API must use the Mac’s LAN IP, not localhost):
 
@@ -159,8 +163,8 @@ npm run s3:cors
 | ------- | ------- |
 | `npm run dev` | API + Vite |
 | `npm run dev:stop` | Free ports 3000 + 5173 |
-| `CAP_SERVER_URL=http://127.0.0.1:5173 npm run cap:live` | Live reload → Simulator |
-| `npm run cap:live -- device` | Live reload → physical device |
+| `npm run cap:live -- ios` | Live reload → Simulator (`127.0.0.1`, ios sync only) |
+| `CAP_SERVER_URL=http://<mac-lan-ip>:5173 npm run cap:live -- ios` | Live reload → physical iPhone |
 | `npm run cap:sync` | Build web + sync into `ios/` / `android/` |
 | `npm run cap:ios` | Sync + open Xcode |
 | `npm run s3:cors` | Refresh S3 CORS for current LAN IP |
@@ -170,7 +174,8 @@ npm run s3:cors
 | Symptom | Fix |
 | ------- | --- |
 | `pod install` fails | Install CocoaPods; from `ios/App` run `pod install` |
-| Blank WebView / can’t reach Vite | Simulator live reload must use `CAP_SERVER_URL=http://127.0.0.1:5173`, not `10.0.2.2` |
+| Blank WebView / can’t reach Vite | Use `npm run cap:live -- ios` (Simulator → `127.0.0.1`), not Android’s `10.0.2.2` |
+| `ENOENT` … `android/.../assets/capacitor.config.json` | Old `cap:live` synced Android too. Use `npm run cap:live -- ios`, or `mkdir -p android/app/src/main/assets` then retry |
 | API errors on device | Set `VITE_API_BASE=http://<mac-lan-ip>:3000` for bundled builds; phone and Mac on same Wi‑Fi |
 | RDS connection refused | Re-login AWS; confirm SG allows this Mac’s public IP; check `DATABASE_URL` |
 | Signing error on device | Xcode → Signing & Capabilities → choose your Team |

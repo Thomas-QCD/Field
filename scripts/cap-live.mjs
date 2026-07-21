@@ -3,13 +3,15 @@
  *
  * Usage:
  *   npm run cap:live              # Android emulator → http://10.0.2.2:5173
+ *   npm run cap:live -- ios       # iOS Simulator → http://127.0.0.1:5173 (sync ios only)
  *   npm run cap:live -- device    # Physical device → http://<LAN-IP>:5173
- *   CAP_SERVER_URL=http://192.168.1.10:5173 npm run cap:live
+ *   CAP_SERVER_URL=http://192.168.1.10:5173 npm run cap:live -- ios
  *
- * Keep `npm run dev` running, then Run the app from Android Studio / Xcode.
+ * Keep `npm run dev` running, then Run from Android Studio / Xcode.
  * To return to bundled assets: `npm run cap:sync`.
  */
 import { spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -29,11 +31,17 @@ function lanIPv4() {
 	return null;
 }
 
-const mode = process.argv[2]; // "device" | undefined
+const mode = process.argv[2]; // "ios" | "android" | "device" | undefined
+const platform =
+	mode === "ios" || mode === "android" ? mode : undefined;
+
 process.env.CAP_LIVE_RELOAD = "1";
 
 if (!process.env.CAP_SERVER_URL) {
-	if (mode === "device") {
+	if (mode === "ios") {
+		// iOS Simulator can reach the Mac host on loopback.
+		process.env.CAP_SERVER_URL = "http://127.0.0.1:5173";
+	} else if (mode === "device") {
 		const ip = lanIPv4();
 		if (!ip) {
 			console.error(
@@ -48,10 +56,22 @@ if (!process.env.CAP_SERVER_URL) {
 	}
 }
 
-console.log(`Capacitor live reload → ${process.env.CAP_SERVER_URL}`);
-console.log("Keep `npm run dev` running, then Run from Android Studio.");
+const runHint =
+	platform === "ios"
+		? "Keep `npm run dev` running, then Run from Xcode."
+		: platform === "android"
+			? "Keep `npm run dev` running, then Run from Android Studio."
+			: "Keep `npm run dev` running, then Run from Android Studio / Xcode.";
 
-const result = spawnSync("npx", ["cap", "sync"], {
+console.log(`Capacitor live reload → ${process.env.CAP_SERVER_URL}`);
+console.log(runHint);
+
+// Fresh clones may lack android/.../assets (generated files are gitignored).
+// Capacitor fails writing capacitor.config.json if the directory is missing.
+mkdirSync(resolve(root, "android/app/src/main/assets"), { recursive: true });
+
+const syncArgs = platform ? ["cap", "sync", platform] : ["cap", "sync"];
+const result = spawnSync("npx", syncArgs, {
 	cwd: root,
 	stdio: "inherit",
 	shell: true,

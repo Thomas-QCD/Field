@@ -45,6 +45,6 @@ npm run cap:ios       # sync + open Xcode (macOS only)
 
 **Physical Android device** — Enable Developer options + USB debugging, connect the device, select it in Android Studio, Run. Live reload: `npm run cap:live -- device`. Bundled build API: `VITE_API_BASE=http://192.168.x.x:3000 npm run cap:sync`. If attachment uploads fail after a LAN IP change, refresh S3 CORS with `npm run s3:cors`.
 
-**iOS (Mac only)** — Full walkthrough: [`docs/ios-quickstart.md`](docs/ios-quickstart.md). Short version: clone/pull, `npm install`, configure `.env`, `npm run dev`, then `CAP_SERVER_URL=http://127.0.0.1:5173 npm run cap:live` and open `ios/App/App.xcworkspace` in Xcode (or `npm run cap:ios` for a bundled build). Pick an iPhone simulator → Run.
+**iOS (Mac only)** — Full walkthrough: [`docs/ios-quickstart.md`](docs/ios-quickstart.md). Short version: clone/pull, `npm install`, configure `.env`, `npm run dev`, then `npm run cap:live -- ios` and open `ios/App/App.xcworkspace` in Xcode (or `npm run cap:ios` for a bundled build). Pick an iPhone simulator → Run.
 
 If `ios/` is missing on the Mac, run `npx cap add ios` once and commit it.
