@@ -1,4 +1,11 @@
 import { createServer } from "node:http";
+import {
+  confirmAttachment,
+  createPresign,
+  deleteAttachment,
+  getAttachmentDownloadUrl,
+  listAttachments,
+} from "./attachments.mjs";
 import { getPool } from "./db.mjs";
 import { createTask, updateTask } from "./createTask.mjs";
 
@@ -485,6 +492,10 @@ async function listTasks(opts = {}) {
        t.task_type,
        t.status,
        t.external_key,
+       t.description,
+       t.window_start_at,
+       t.window_end_at,
+       cu.display_name AS created_by_name,
        (
          SELECT string_agg(c.name, ', ' ORDER BY c.name)
          FROM task_contacts tc
@@ -507,6 +518,7 @@ async function listTasks(opts = {}) {
        ) AS crew_name
      FROM tasks t
      LEFT JOIN addresses a ON a.id = t.destination_address_id
+     LEFT JOIN users cu ON cu.id = t.created_by_user_id
      WHERE t.deleted_at IS NULL
        ${crewClause}
      ORDER BY t.created_at DESC, t.id DESC`,
@@ -518,9 +530,17 @@ async function listTasks(opts = {}) {
     taskType: row.task_type,
     status: row.status,
     externalKey: row.external_key ?? "",
+    description: row.description ?? "",
     contactNames: row.contact_names ?? "",
     destinationAddress: row.destination_address ?? "",
     crewName: row.crew_name ?? null,
+    createdByName: row.created_by_name ?? "",
+    windowStartAt: row.window_start_at
+      ? new Date(row.window_start_at).toISOString()
+      : null,
+    windowEndAt: row.window_end_at
+      ? new Date(row.window_end_at).toISOString()
+      : null,
   }));
 }
 
@@ -735,6 +755,59 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    const attachmentPresignMatch = url.pathname.match(
+      /^\/api\/tasks\/(\d+)\/attachments\/presign$/,
+    );
+    if (req.method === "POST" && attachmentPresignMatch) {
+      const taskId = Number(attachmentPresignMatch[1]);
+      const body = await readJsonBody(req);
+      const result = await createPresign(taskId, body);
+      sendJson(res, result);
+      return;
+    }
+
+    const attachmentUrlMatch = url.pathname.match(
+      /^\/api\/tasks\/(\d+)\/attachments\/(\d+)\/url$/,
+    );
+    if (req.method === "GET" && attachmentUrlMatch) {
+      const taskId = Number(attachmentUrlMatch[1]);
+      const attachmentId = Number(attachmentUrlMatch[2]);
+      const inline = url.searchParams.get("inline") === "1";
+      const result = await getAttachmentDownloadUrl(taskId, attachmentId, {
+        inline,
+      });
+      sendJson(res, result);
+      return;
+    }
+
+    const attachmentItemMatch = url.pathname.match(
+      /^\/api\/tasks\/(\d+)\/attachments\/(\d+)$/,
+    );
+    if (req.method === "DELETE" && attachmentItemMatch) {
+      const taskId = Number(attachmentItemMatch[1]);
+      const attachmentId = Number(attachmentItemMatch[2]);
+      await deleteAttachment(taskId, attachmentId);
+      sendNoContent(res);
+      return;
+    }
+
+    const attachmentsMatch = url.pathname.match(
+      /^\/api\/tasks\/(\d+)\/attachments$/,
+    );
+    if (req.method === "GET" && attachmentsMatch) {
+      const taskId = Number(attachmentsMatch[1]);
+      const attachments = await listAttachments(taskId);
+      sendJson(res, { attachments });
+      return;
+    }
+    if (req.method === "POST" && attachmentsMatch) {
+      const taskId = Number(attachmentsMatch[1]);
+      const body = await readJsonBody(req);
+      const attachment = await confirmAttachment(taskId, body);
+      sendJson(res, { attachment }, 201);
+      return;
+    }
+
     const taskMatch = url.pathname.match(/^\/api\/tasks\/(\d+)$/);
     if (req.method === "GET" && taskMatch) {
       const task = await getTask(Number(taskMatch[1]));
@@ -742,7 +815,8 @@ const server = createServer(async (req, res) => {
         sendJson(res, { error: "Task not found" }, 404);
         return;
       }
-      sendJson(res, { task });
+      const attachments = await listAttachments(Number(taskMatch[1]));
+      sendJson(res, { task: { ...task, attachments } });
       return;
     }
     if (req.method === "PUT" && taskMatch) {

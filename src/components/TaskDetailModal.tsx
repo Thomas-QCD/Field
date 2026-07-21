@@ -16,8 +16,10 @@ import {
 import { Pencil, Trash2 } from 'lucide-react';
 import { getTask } from '../api/tasks';
 import { formatShortName } from '../formatName';
+import { formatTimeAgo } from '../formatTime';
 import type { TaskDetail, TaskStatus } from '../types/task';
 import { KeyboardAwareModal } from './KeyboardAwareModal';
+import { TaskAttachments } from './TaskAttachments';
 
 interface TaskDetailModalProps {
 	taskId: number | null;
@@ -73,33 +75,6 @@ function formatDuration(
 	if (hours > 0) parts.push(`${hours}h`);
 	if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`);
 	return parts.join(' ');
-}
-
-function formatTimeAgo(value: string | null): string | null {
-	if (!value) return null;
-	const d = new Date(value);
-	if (Number.isNaN(d.getTime())) return null;
-
-	const seconds = Math.round((Date.now() - d.getTime()) / 1000);
-	const future = seconds < 0;
-	const abs = Math.abs(seconds);
-
-	let label: string;
-	if (abs < 45) label = 'just now';
-	else if (abs < 90) label = '1 minute';
-	else if (abs < 45 * 60) label = `${Math.round(abs / 60)} minutes`;
-	else if (abs < 90 * 60) label = '1 hour';
-	else if (abs < 22 * 60 * 60) label = `${Math.round(abs / 3600)} hours`;
-	else if (abs < 36 * 60 * 60) label = '1 day';
-	else if (abs < 26 * 24 * 60 * 60) label = `${Math.round(abs / 86400)} days`;
-	else if (abs < 46 * 24 * 60 * 60) label = '1 month';
-	else if (abs < 320 * 24 * 60 * 60)
-		label = `${Math.round(abs / (30 * 86400))} months`;
-	else if (abs < 548 * 24 * 60 * 60) label = '1 year';
-	else label = `${Math.round(abs / (365 * 86400))} years`;
-
-	if (label === 'just now') return label;
-	return future ? `in ${label}` : `${label} ago`;
 }
 
 function formatDateTimeWithAgo(value: string | null): string {
@@ -195,7 +170,9 @@ export function TaskDetailModal({
 
 	const handleDelete = async () => {
 		if (!task || !onDelete) return;
-		const label = task.externalKey ? `#${task.externalKey}` : `task #${task.id}`;
+		const label = task.externalKey
+			? `#${task.externalKey}`
+			: `task #${task.id}`;
 		if (!window.confirm(`Delete ${label}?`)) return;
 		setDeleting(true);
 		setDeleteError(null);
@@ -381,6 +358,13 @@ export function TaskDetailModal({
 								value={task.canStartEarly ? 'Yes' : 'No'}
 							/>
 						</SimpleGrid>
+					</Section>
+
+					<Section label='Attachments'>
+						<TaskAttachments
+							taskId={task.id}
+							initialAttachments={task.attachments}
+						/>
 					</Section>
 
 					{(task.completedAt || task.completedNotes || task.failedReason) && (

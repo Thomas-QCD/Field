@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Group, Loader, Title, Box } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { Plus } from 'lucide-react';
 import type {
 	ColDef,
-	ICellRendererParams,
 	RowClickedEvent,
 	ValueFormatterParams,
 } from 'ag-grid-community';
@@ -11,22 +12,14 @@ import { AllCommunityModule } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
 import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
 import { useCurrentUser } from '../context/CurrentUserContext';
-import type { Task, TaskDetail, TaskStatus } from '../types/task';
+import type { Task, TaskDetail } from '../types/task';
 import {
 	NewTaskModal,
 	type NewTaskFormValues,
 } from '../components/NewTaskModal';
 import { TaskDetailModal } from '../components/TaskDetailModal';
-import { formatShortNameList } from '../formatName';
-
-function StatusCell({ value }: ICellRendererParams<Task, TaskStatus>) {
-	if (!value) return null;
-	return (
-		<span className='task-status' data-status={value}>
-			{value}
-		</span>
-	);
-}
+import { TaskCards } from '../components/TaskCards';
+import { formatTimeAgo } from '../formatTime';
 
 function toDateTimeLocal(iso: string | null): string {
 	if (!iso) {
@@ -39,6 +32,23 @@ function toDateTimeLocal(iso: string | null): string {
 	if (Number.isNaN(d.getTime())) return toDateTimeLocal(null);
 	const pad = (n: number) => String(n).padStart(2, '0');
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function isSameLocalDay(iso: string | null, day: Date): boolean {
+	if (!iso) return false;
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return false;
+	return (
+		d.getFullYear() === day.getFullYear() &&
+		d.getMonth() === day.getMonth() &&
+		d.getDate() === day.getDate()
+	);
+}
+
+function startTimeMs(iso: string | null): number {
+	if (!iso) return Number.POSITIVE_INFINITY;
+	const ms = new Date(iso).getTime();
+	return Number.isNaN(ms) ? Number.POSITIVE_INFINITY : ms;
 }
 
 function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
@@ -75,22 +85,7 @@ const columnDefs: ColDef<Task>[] = [
 		field: 'taskType',
 		headerName: 'Type',
 		minWidth: 72,
-		flex: 0.6,
-	},
-	{
-		field: 'status',
-		headerName: 'Status',
-		cellRenderer: StatusCell,
-		minWidth: 88,
-		flex: 0.6,
-	},
-	{
-		field: 'crewName',
-		headerName: 'Crew',
-		valueFormatter: (p: ValueFormatterParams<Task, string | null>) =>
-			p.value ? formatShortNameList(p.value) : 'Unassigned',
-		minWidth: 88,
-		flex: 1,
+		flex: 0.5,
 	},
 	{
 		field: 'destinationAddress',
@@ -99,22 +94,28 @@ const columnDefs: ColDef<Task>[] = [
 		flex: 1.2,
 	},
 	{
-		field: 'contactNames',
-		headerName: 'Contacts',
-		valueFormatter: (p: ValueFormatterParams<Task, string>) =>
-			p.value ? formatShortNameList(p.value) : '',
-		minWidth: 88,
-		flex: 1,
+		field: 'windowStartAt',
+		headerName: 'Start',
+		valueFormatter: (p: ValueFormatterParams<Task, string | null>) =>
+			formatTimeAgo(p.value ?? null) ?? '',
+		minWidth: 120,
+		flex: 1.2,
 	},
 ];
 
+/** Survives TasksPage remount when navigating to/from task view. */
+let showTodayOnlyMemory = false;
+
 export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 	const { user } = useCurrentUser();
+	const navigate = useNavigate();
+	const isMobile = useMediaQuery('(max-width: 47.9975em)');
 	const [newTaskOpen, setNewTaskOpen] = useState(false);
 	const [editingTask, setEditingTask] = useState<TaskDetail | null>(null);
 	const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
 	const [tasks, setTasks] = useState<Task[]>([]);
 	const [hideDelivery, setHideDelivery] = useState(false);
+	const [showTodayOnly, setShowTodayOnly] = useState(showTodayOnlyMemory);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
@@ -127,15 +128,26 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 		[],
 	);
 
-	const visibleTasks = useMemo(
-		() =>
-			hideDelivery
-				? tasks.filter((task) => task.taskType !== 'Delivery')
-				: tasks,
-		[tasks, hideDelivery],
-	);
+	const visibleTasks = useMemo(() => {
+		let next = tasks;
+		if (mode === 'all' && hideDelivery) {
+			next = next.filter((task) => task.taskType !== 'Delivery');
+		}
+		if (mode === 'mine' && showTodayOnly) {
+			const today = new Date();
+			next = next.filter((task) => isSameLocalDay(task.windowStartAt, today));
+		}
+		if (mode === 'mine') {
+			next = [...next].sort(
+				(a, b) => startTimeMs(a.windowStartAt) - startTimeMs(b.windowStartAt),
+			);
+		}
+		return next;
+	}, [tasks, mode, hideDelivery, showTodayOnly]);
 
-	const crewMemberId = mode === 'mine' ? user?.id ?? null : null;
+	const useCardView = mode === 'mine' && showTodayOnly && Boolean(isMobile);
+
+	const crewMemberId = mode === 'mine' ? (user?.id ?? null) : null;
 
 	const refreshTasks = useCallback(
 		async (signal?: AbortSignal) => {
@@ -183,9 +195,17 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 		await refreshTasks();
 	};
 
+	const openTask = (id: number) => {
+		if (isMobile) {
+			navigate(`/task/${id}`);
+			return;
+		}
+		setDetailTaskId(id);
+	};
+
 	const handleRowClicked = (event: RowClickedEvent<Task>) => {
 		if (event.data?.id != null) {
-			setDetailTaskId(event.data.id);
+			openTask(event.data.id);
 		}
 	};
 
@@ -210,7 +230,8 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 		[editingTask],
 	);
 
-	const pageTitle = mode === 'mine' ? 'My Tasks' : 'Tasks';
+	const pageTitle =
+		mode === 'mine' ? (showTodayOnly ? "Today's Tasks" : 'My Tasks') : 'Tasks';
 
 	return (
 		<Box className='tasks-page'>
@@ -218,13 +239,29 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 				<Title order={1} fz={{ base: 'h3', sm: 'h2' }}>
 					{pageTitle}
 				</Title>
-				<Button
-					variant={hideDelivery ? 'light' : 'default'}
-					color='brand'
-					onClick={() => setHideDelivery((v) => !v)}
-				>
-					{hideDelivery ? 'Show Delivery' : 'Hide Delivery'}
-				</Button>
+				{mode === 'mine' ? (
+					<Button
+						variant={showTodayOnly ? 'light' : 'default'}
+						color='brand'
+						onClick={() =>
+							setShowTodayOnly((v) => {
+								const next = !v;
+								showTodayOnlyMemory = next;
+								return next;
+							})
+						}
+					>
+						{showTodayOnly ? 'Show All' : 'Show Today Only'}
+					</Button>
+				) : (
+					<Button
+						variant={hideDelivery ? 'light' : 'default'}
+						color='brand'
+						onClick={() => setHideDelivery((v) => !v)}
+					>
+						{hideDelivery ? 'Show Delivery' : 'Hide Delivery'}
+					</Button>
+				)}
 				{mode === 'all' ? (
 					<Button
 						leftSection={<Plus size={18} />}
@@ -251,12 +288,16 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 				</Alert>
 			) : null}
 
-			<Box className='tasks-grid-wrap ag-theme-quartz'>
-				{loading && tasks.length === 0 ? (
-					<Group justify='center' py='xl'>
-						<Loader size='sm' />
-					</Group>
-				) : (
+			{loading && tasks.length === 0 ? (
+				<Group justify='center' py='xl'>
+					<Loader size='sm' />
+				</Group>
+			) : useCardView ? (
+				<Box className='tasks-cards-wrap'>
+					<TaskCards tasks={visibleTasks} onSelect={openTask} />
+				</Box>
+			) : (
+				<Box className='tasks-grid-wrap ag-theme-quartz'>
 					<AgGridProvider modules={[AllCommunityModule]}>
 						<AgGridReact<Task>
 							rowData={visibleTasks}
@@ -272,8 +313,8 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 							onFirstDataRendered={(e) => e.api.sizeColumnsToFit()}
 						/>
 					</AgGridProvider>
-				)}
-			</Box>
+				</Box>
+			)}
 
 			<NewTaskModal
 				opened={newTaskOpen || editingTask != null}
@@ -284,7 +325,7 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 
 			<TaskDetailModal
 				taskId={detailTaskId}
-				opened={detailTaskId != null}
+				opened={!isMobile && detailTaskId != null}
 				onClose={() => setDetailTaskId(null)}
 				onEdit={handleEditTask}
 				onDelete={handleDeleteTask}

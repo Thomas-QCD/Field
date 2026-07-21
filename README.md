@@ -43,8 +43,8 @@ npm run cap:ios       # sync + open Xcode (macOS only)
 
 **Android Studio (this machine)** — Install Android Studio + an AVD (API 24+). Keep the host API up (`aws login` on this PC if RDS secrets expired, then `npm run dev`). Prefer `cap:live` for iteration, or `npm run cap:android` for a bundled build. Bundled builds reach the host API at `10.0.2.2:3000` (you do not run AWS login inside the emulator).
 
-**Physical Android device** — Enable Developer options + USB debugging, connect the device, select it in Android Studio, Run. Live reload: `npm run cap:live -- device`. Bundled build API: `VITE_API_BASE=http://192.168.x.x:3000 npm run cap:sync`.
+**Physical Android device** — Enable Developer options + USB debugging, connect the device, select it in Android Studio, Run. Live reload: `npm run cap:live -- device`. Bundled build API: `VITE_API_BASE=http://192.168.x.x:3000 npm run cap:sync`. If attachment uploads fail after a LAN IP change, refresh S3 CORS with `npm run s3:cors`.
 
-**iOS Simulator (iMac)** — iOS cannot be built on Windows. On the Mac: clone/pull, `npm install`, `npm run cap:sync` (runs `pod install` via CocoaPods), then `npm run cap:ios` or open `ios/App/App.xcworkspace` in Xcode. Pick an iPhone simulator → Run. For live reload on simulator, set `CAP_SERVER_URL=http://127.0.0.1:5173` before `npm run cap:live`.
+**iOS (Mac only)** — Full walkthrough: [`docs/ios-quickstart.md`](docs/ios-quickstart.md). Short version: clone/pull, `npm install`, configure `.env`, `npm run dev`, then `CAP_SERVER_URL=http://127.0.0.1:5173 npm run cap:live` and open `ios/App/App.xcworkspace` in Xcode (or `npm run cap:ios` for a bundled build). Pick an iPhone simulator → Run.
 
 If `ios/` is missing on the Mac, run `npx cap add ios` once and commit it.

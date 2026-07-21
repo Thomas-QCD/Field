@@ -31,10 +31,17 @@ function mergeModalStyles(
 	};
 }
 
+/** Top inset: shell header, device safe area, or Mantine’s default 5dvh. */
+const TOP_INSET =
+	'max(5dvh, calc(var(--field-shell-header, 0px) + var(--field-modal-gap, 8px)), env(safe-area-inset-top, 0px))';
+
+/** Bottom inset when the soft keyboard is closed. */
+const BOTTOM_INSET =
+	'max(5dvh, calc(var(--field-shell-footer, 0px) + var(--field-modal-gap, 8px)))';
+
 /**
- * Mantine Modal that lifts above the soft keyboard on mobile.
- * When the keyboard opens, centering is disabled and the dialog is pinned
- * to the visible viewport above the keyboard.
+ * Mantine Modal capped to the visible app area (above footer /
+ * device chrome) and lifted above the soft keyboard on mobile.
  */
 export function KeyboardAwareModal({
 	centered = true,
@@ -44,27 +51,26 @@ export function KeyboardAwareModal({
 }: ModalProps) {
 	const keyboard = useVirtualKeyboard();
 	const lift = Boolean(opened && keyboard.isOpen && keyboard.height > 0);
+	const bottomInset = lift ? `${keyboard.height + 12}px` : BOTTOM_INSET;
 
-	const keyboardStyles: ModalStyleMap | undefined = lift
-		? {
-				inner: {
-					alignItems: 'flex-start',
-					paddingTop: 'max(12px, env(safe-area-inset-top, 0px))',
-					paddingBottom: keyboard.height + 12,
-				},
-				content: {
-					maxHeight: `calc(100dvh - ${keyboard.height}px - 24px - env(safe-area-inset-top, 0px))`,
-					overflowY: 'auto',
-				},
-			}
-		: undefined;
+	const layoutStyles: ModalStyleMap = {
+		inner: {
+			alignItems: lift ? 'flex-start' : undefined,
+			paddingTop: TOP_INSET,
+			paddingBottom: bottomInset,
+		},
+		content: {
+			maxHeight: `calc(100dvh - (${TOP_INSET}) - (${bottomInset}))`,
+			overflowY: 'auto',
+		},
+	};
 
 	return (
 		<Modal
 			{...props}
 			opened={opened}
 			centered={lift ? false : centered}
-			styles={mergeModalStyles(styles, keyboardStyles)}
+			styles={mergeModalStyles(styles, layoutStyles)}
 		/>
 	);
 }

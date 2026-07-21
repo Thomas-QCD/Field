@@ -24,6 +24,10 @@ export interface Task {
   contactNames: string;
   destinationAddress: string;
   crewName: string | null;
+  windowStartAt: string | null;
+  windowEndAt: string | null;
+  description: string;
+  createdByName: string;
 }
 
 export interface TaskCrewMember {
@@ -36,6 +40,22 @@ export interface TaskContact {
   name: string;
   phone: string;
   email: string;
+}
+
+export type AttachmentKind = 'photo' | 'signature' | 'document';
+
+export interface TaskAttachment {
+  id: number;
+  taskId: number;
+  kind: AttachmentKind;
+  storageKey: string;
+  mimeType: string;
+  fileName: string | null;
+  fileSizeBytes: number | null;
+  caption: string | null;
+  createdAt: string;
+  uploadedByUserId: string;
+  uploadedByName: string | null;
 }
 
 export interface TaskDetail {
@@ -63,4 +83,5 @@ export interface TaskDetail {
   updatedAt: string;
   createdByName: string;
   crewMembers: TaskCrewMember[];
+  attachments?: TaskAttachment[];
 }

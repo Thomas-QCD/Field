@@ -5,12 +5,9 @@ import {
 } from 'react-router-dom';
 import {
 	AppShell,
-	Group,
 	NavLink,
 	Text,
 	Box,
-	Select,
-	Loader,
 	UnstyledButton,
 } from '@mantine/core';
 import {
@@ -18,9 +15,9 @@ import {
 	ClipboardList,
 	Contact,
 	MapPinned,
-	UserRound,
+	Menu,
 } from 'lucide-react';
-import { useCurrentUser } from '../context/CurrentUserContext';
+import { UserSelect } from './UserSelect';
 
 const navLinkStyles = {
 	root: {
@@ -35,43 +32,13 @@ const bottomNavItems = [
 	{ to: '/tasks', end: false, label: 'Tasks', icon: ClipboardList },
 	{ to: '/contacts', end: false, label: 'Contacts', icon: Contact },
 	{ to: '/addresses', end: false, label: 'Addresses', icon: MapPinned },
+	{ to: '/more', end: false, label: 'More', icon: Menu },
 ] as const;
 
 function isNavActive(pathname: string, to: string, end: boolean) {
 	return end
 		? pathname === to
 		: pathname === to || pathname.startsWith(`${to}/`);
-}
-
-function UserSelect() {
-	const { user, users, loading, setUserId } = useCurrentUser();
-
-	const userOptions = users.map((u) => ({
-		value: u.id,
-		label: u.displayName,
-	}));
-
-	return (
-		<Select
-			size='sm'
-			data={userOptions}
-			value={user?.id ?? null}
-			onChange={(id) => setUserId(id)}
-			placeholder={loading ? 'Loading…' : 'Select user'}
-			searchable
-			leftSection={
-				loading ? <Loader size={14} color='gray' /> : <UserRound size={16} />
-			}
-			nothingFoundMessage='No users'
-			comboboxProps={{ withinPortal: true, shadow: 'md' }}
-			classNames={{
-				input: 'field-user-select-input',
-				dropdown: 'field-user-select-dropdown',
-				option: 'field-user-select-option',
-			}}
-			aria-label='Current user'
-		/>
-	);
 }
 
 export function FieldAppShell() {
@@ -81,7 +48,6 @@ export function FieldAppShell() {
 		<AppShell
 			padding='md'
 			layout='alt'
-			header={{ height: 56 }}
 			footer={{ height: 64 }}
 			navbar={{
 				width: 240,
@@ -95,11 +61,6 @@ export function FieldAppShell() {
 					borderRight: 'none',
 					zIndex: 202,
 				},
-				header: {
-					background: 'rgb(245 245 245 / 92%)',
-					backdropFilter: 'blur(8px)',
-					zIndex: 201,
-				},
 				footer: {
 					background: 'var(--color-sidebar)',
 					borderTop: 'none',
@@ -110,17 +71,6 @@ export function FieldAppShell() {
 				},
 			}}
 		>
-			<AppShell.Header>
-				<Group h={56} gap='sm' px='md' justify='space-between' wrap='nowrap'>
-					<Text fw={700} fz='lg' style={{ fontFamily: 'var(--font-display)' }}>
-						Field
-					</Text>
-					<Box hiddenFrom='sm' maw='58%' className='field-header-user-select'>
-						<UserSelect />
-					</Box>
-				</Group>
-			</AppShell.Header>
-
 			<AppShell.Navbar p='md' visibleFrom='sm'>
 				<AppShell.Section mb='md'>
 					<Text

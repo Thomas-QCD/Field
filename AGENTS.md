@@ -120,19 +120,21 @@ Android and iOS apps are delivered by wrapping the **same built web app** in a n
 
 ## Development environment
 
-App, API, and most services run on the developer machine. **RDS PostgreSQL `field-dev` is provisioned** in account `730335210534`, region `us-west-1`, for cloud-backed local development. Do not provision Cognito, S3, SES, or other AWS resources without user approval.
+App, API, and most services run on the developer machine. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-attachments`** are provisioned in account `730335210534`, region `us-west-1`, for cloud-backed local development. Do not provision Cognito, SES, or other AWS resources without user approval.
 
 | Concern      | Local (now)                                              | AWS (current / target)                          |
 | ------------ | -------------------------------------------------------- | ----------------------------------------------- |
 | Database     | PostgreSQL via Docker Compose, or RDS `field-dev`        | **RDS `field-dev`** (us-west-1) — see `.env.example` |
 | API          | `localhost` — Node/other runtime on dev machine          | ECS Fargate, Lambda, etc. (not yet)             |
 | Web app      | Vite dev server                                          | S3 + CloudFront (not yet)                       |
-| File storage | Local filesystem or `./storage` directory                | S3 (not yet)                                    |
+| File storage | Task attachments via S3 `field-dev-attachments` (presigned URLs); PDF scripts still write `./storage/documents` | S3                                          |
 | Web auth     | Simple local auth (dev users, JWT stub, or session mock) | Amazon Cognito (not yet)                        |
 | Email        | Log to console, write to file, or Mailpit/Mailhog        | Amazon SES (not yet)                            |
-| PDF output   | Local `./storage/documents`                              | S3 (not yet)                                    |
+| PDF output   | Local `./storage/documents`                              | S3 (later)                                      |
 
 **RDS `field-dev` (dev):** `db.t4g.micro`, Single-AZ, 20 GB gp3, publicly accessible, security group locked to the developer public IP. Master password in Secrets Manager. Connection placeholders in [`.env.example`](.env.example).
+
+**S3 `field-dev-attachments` (dev):** private bucket in us-west-1 for task attachments (presigned PUT/GET). CORS allows browser Vite, Android emulator (`10.0.2.2`), Capacitor WebView origins, and the current LAN IP for `cap:live -- device`. When the LAN IP changes: `npm run s3:cors`. Env: `AWS_REGION`, `S3_BUCKET` in [`.env.example`](.env.example).
 
 **Wodely sync (AWS):** Licensed-system webhooks hit Lambda `WOO-message-handler` (API Gateway); reconciler `updateModifiedWooTasks` runs on EventBridge Scheduler. Both dual-write DynamoDB `WOO-tasks` and RDS `field` (`tasks.id` = Wodely Id). Source under [`aws/lambdas/`](aws/lambdas/). Type/status mapping in [`docs/database-design.md`](docs/database-design.md).
 
@@ -250,7 +252,7 @@ Master design in [`docs/sdd.md`](docs/sdd.md); proceed with MVP vertical slices.
 - **Web:** authenticated session (local auth in dev; Cognito JWT in production) — auth not wired yet.
 - **Mobile:** deactivated until QR activation; durable device session; remote revoke supported in design (not implemented yet).
 - Do not unify auth across clients — web uses Cognito/session JWT; mobile uses QR-issued device sessions.
-- RDS `field-dev` exists in us-west-1; do not provision other AWS services without user approval.
+- RDS `field-dev` and S3 `field-dev-attachments` exist in us-west-1; do not provision other AWS services without user approval.
 
 ## Open Questions (to resolve with the user)
 

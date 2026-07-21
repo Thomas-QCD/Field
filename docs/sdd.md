@@ -63,14 +63,14 @@ Engineers, architects, and AI agents implementing Field. For agent quick-referen
 
 ### 2.3 Development environment (local-first)
 
-App and API run locally. **RDS PostgreSQL `field-dev`** is provisioned in `us-west-1` for cloud-backed development. Do not provision Cognito, S3, SES, or other AWS resources unless requested.
+App and API run locally. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-attachments`** are provisioned in `us-west-1` for cloud-backed development. Do not provision Cognito, SES, or other AWS resources unless requested.
 
 | Concern      | Local (current)                              | AWS (current / target)        |
 | ------------ | -------------------------------------------- | ----------------------------- |
 | Database     | Docker PostgreSQL **or** RDS `field-dev`     | **RDS `field-dev`** (us-west-1) |
 | API          | `localhost`                                  | API Gateway + ECS/Lambda      |
 | Web app      | Vite dev server                              | S3 + CloudFront               |
-| Files / PDFs | Local `./storage` directory                  | S3                            |
+| Files / PDFs | Attachments → S3 `field-dev-attachments`; PDF scripts → `./storage/documents` | S3          |
 | Web auth     | Dev auth stub or simple JWT                  | Cognito                       |
 | Email        | Console, file, or Mailpit                    | SES                           |
 
@@ -352,10 +352,10 @@ interface TaskReadModel {
 
 | Environment          | Attachments & PDFs                             | Referenced by                 |
 | -------------------- | ---------------------------------------------- | ----------------------------- |
-| **Local dev**        | `./storage/attachments`, `./storage/documents` | `storage_key` (relative path) |
+| **Local / cloud-dev** | Attachments: S3 `field-dev-attachments` (presigned PUT/GET via local API). PDF scripts: `./storage/documents` | `storage_key` (S3 object key or relative path) |
 | **Production (AWS)** | S3 bucket(s)                                   | `storage_key` (S3 object key) |
 
-Use a storage abstraction interface. Local: direct file read/write or local HTTP. Production: presigned S3 URLs. Do not serve files publicly without auth checks.
+Use a storage abstraction interface (`server/storage.mjs`). Attachment uploads use short-lived presigned S3 URLs; do not serve files publicly without auth checks. Bucket CORS includes Capacitor live-reload origins (`npm run s3:cors` when LAN IP changes).
 
 ---
 
@@ -588,7 +588,7 @@ App, API, storage, email, and auth run on the developer machine. Database may be
 | Database  | Docker Compose **or** RDS `field-dev` (us-west-1)   |
 | API       | Node process on `localhost:3000` (port TBD)         |
 | Web       | Vite on `localhost:5173`                            |
-| Storage   | `./storage/` directory                              |
+| Storage   | Attachments → S3 `field-dev-attachments`; PDF scripts → `./storage/documents` |
 | Email     | Console log or Mailpit                              |
 | Auth      | Dev user seed + local JWT                           |
 
@@ -603,7 +603,7 @@ Connection placeholders: [`.env.example`](../.env.example).
 | Static web hosting | S3 + CloudFront                         | Not yet                                              |
 | API                | API Gateway + ECS Fargate _(or Lambda)_ | Not yet                                              |
 | Auth               | Cognito                                 | Not yet (web only)                                   |
-| Object storage     | S3                                      | Not yet                                              |
+| Object storage     | S3 `field-dev-attachments`          | **Provisioned** (dev) — private, SSE-S3, CORS for web + Capacitor live reload |
 | Email              | SES                                     | Not yet                                              |
 | Async jobs         | SQS + Lambda _(optional)_               | Not yet                                              |
 | DNS / TLS          | Route 53 + ACM                          | Not yet                                              |

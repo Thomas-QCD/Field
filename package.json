@@ -20,9 +20,12 @@
     "db:schema": "node scripts/apply-schema.mjs",
     "db:import-contacts": "node scripts/import-contacts.mjs",
     "db:import-addresses": "node scripts/import-addresses.mjs",
-    "db:import-users": "node scripts/import-users.mjs"
+    "db:import-users": "node scripts/import-users.mjs",
+    "s3:cors": "node scripts/s3-cors.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1091.0",
+    "@aws-sdk/s3-request-presigner": "^3.1091.0",
     "@capacitor/android": "^7.6.8",
     "@capacitor/core": "^7.6.8",
     "@capacitor/ios": "^7.6.8",

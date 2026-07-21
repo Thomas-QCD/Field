@@ -5,6 +5,13 @@ body,
   margin: 0;
 }
 
+/* Portaled modals read these from :root (AppShell vars stay on .field-app-shell). */
+:root {
+  --field-shell-header: 0px;
+  --field-shell-footer: 0px;
+  --field-modal-gap: 8px;
+}
+
 body {
   font-family: var(--font-sans);
   color: var(--color-text);
@@ -31,18 +38,18 @@ body {
   color: var(--color-text-on-dark) !important;
 }
 
-.field-header-user-select .field-user-select-input {
+.field-user-select-input::placeholder {
+  color: var(--color-text-on-dark-muted);
+}
+
+.field-user-select-input--light {
   background: var(--color-surface-raised) !important;
   border-color: var(--color-border) !important;
   color: var(--color-text) !important;
 }
 
-.field-header-user-select .field-user-select-input::placeholder {
+.field-user-select-input--light::placeholder {
   color: var(--color-text-muted);
-}
-
-.field-user-select-input::placeholder {
-  color: var(--color-text-on-dark-muted);
 }
 
 .field-user-select-dropdown {
@@ -61,7 +68,7 @@ body {
 
 .field-bottom-nav-inner {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   height: 100%;
   width: 100%;
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -122,9 +129,15 @@ body {
 
 /* Mobile: sidebar stays collapsed; bottom footer is the primary nav. */
 @media (max-width: 47.99em) {
+  :root {
+    --field-shell-header: 0px;
+    --field-shell-footer: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
   .field-app-shell {
     --app-shell-navbar-offset: 0px !important;
-    --app-shell-header-offset: var(--app-shell-header-height, 56px);
+    --app-shell-header-offset: 0px !important;
+    --app-shell-header-height: 0px !important;
     --app-shell-footer-height: calc(64px + env(safe-area-inset-bottom, 0px));
     --app-shell-footer-offset: var(--app-shell-footer-height);
   }
@@ -138,16 +151,13 @@ body {
   }
 }
 
-/* Desktop: permanent sidebar — hide the mobile top header and bottom nav. */
+/* Desktop: permanent sidebar — hide the mobile bottom nav. */
 @media (min-width: 48em) {
   .field-app-shell {
-    --app-shell-header-offset: 0px !important;
-    --app-shell-header-height: 0px !important;
     --app-shell-footer-offset: 0px !important;
     --app-shell-footer-height: 0px !important;
   }
 
-  .field-app-shell .mantine-AppShell-header,
   .field-app-shell .mantine-AppShell-footer {
     display: none !important;
   }
