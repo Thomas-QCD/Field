@@ -61,6 +61,20 @@
 	cursor: pointer;
 }
 
+.tasks-grid-wrap .ag-cell {
+	display: flex;
+	align-items: center;
+}
+
+/* Taller rows on mobile for easier touch targets (default AG row is ~42px). */
+@media (max-width: 47.99em) {
+	.tasks-grid-wrap {
+		--ag-row-height: 56px;
+		--ag-header-height: 48px;
+		--ag-list-item-height: 56px;
+	}
+}
+
 .task-status {
 	font-size: 0.8rem;
 	font-weight: 600;

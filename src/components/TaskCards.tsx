@@ -1,5 +1,5 @@
 import type { Task } from '../types/task';
-import { formatShortName } from '../formatName';
+import { formatShortName, formatShortNameList } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
 
 function formatWindow(start: string | null, end: string | null): string {
@@ -57,6 +57,14 @@ export function TaskCards({
 							value={
 								task.createdByName
 									? formatShortName(task.createdByName)
+									: ''
+							}
+						/>
+						<CardRow
+							label='Crew'
+							value={
+								task.crewName
+									? formatShortNameList(task.crewName)
 									: ''
 							}
 						/>

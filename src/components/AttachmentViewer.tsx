@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { UnstyledButton } from '@mantine/core';
 import { X } from 'lucide-react';
+import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
 
 interface AttachmentViewerProps {
 	opened: boolean;
@@ -66,6 +67,8 @@ export function AttachmentViewer({
 		applyTransform();
 		bump((n) => n + 1);
 	};
+
+	useAndroidBackHandler(onClose, opened);
 
 	useEffect(() => {
 		if (!opened) {

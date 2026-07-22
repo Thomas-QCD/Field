@@ -1,5 +1,6 @@
 import { Modal, type ModalProps, type ModalStylesNames } from '@mantine/core';
 import type { CSSProperties } from 'react';
+import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
 import { useVirtualKeyboard } from '../hooks/useVirtualKeyboard';
 
 type ModalStyleMap = Partial<Record<ModalStylesNames, CSSProperties>>;
@@ -47,11 +48,15 @@ export function KeyboardAwareModal({
 	centered = true,
 	styles,
 	opened,
+	onClose,
 	...props
 }: ModalProps) {
 	const keyboard = useVirtualKeyboard();
 	const lift = Boolean(opened && keyboard.isOpen && keyboard.height > 0);
 	const bottomInset = lift ? `${keyboard.height + 12}px` : BOTTOM_INSET;
+
+	// Same as the modal close control (not Escape-gated).
+	useAndroidBackHandler(() => onClose?.(), Boolean(opened && onClose));
 
 	const layoutStyles: ModalStyleMap = {
 		inner: {
@@ -69,6 +74,7 @@ export function KeyboardAwareModal({
 		<Modal
 			{...props}
 			opened={opened}
+			onClose={onClose}
 			centered={lift ? false : centered}
 			styles={mergeModalStyles(styles, layoutStyles)}
 		/>

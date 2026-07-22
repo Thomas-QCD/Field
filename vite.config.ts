@@ -10,8 +10,11 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        // Prefer IPv4 loopback — `localhost` can hit ::1 on Windows and flake.
+        target: 'http://127.0.0.1:3000',
         changeOrigin: true,
+        timeout: 60_000,
+        proxyTimeout: 60_000,
       },
     },
     // Capacitor native projects + build junk must not trigger HMR / full reloads

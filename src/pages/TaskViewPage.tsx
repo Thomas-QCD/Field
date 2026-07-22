@@ -12,6 +12,7 @@ import { getTask } from '../api/tasks';
 import { TaskAttachments } from '../components/TaskAttachments';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
+import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
 import { openMapsNavigation } from '../openMapsNavigation';
 import type { TaskDetail } from '../types/task';
 
@@ -171,6 +172,8 @@ export function TaskViewPage() {
 		}
 		navigate(-1);
 	};
+
+	useAndroidBackHandler(goBack, true);
 
 	useEffect(() => {
 		if (!Number.isFinite(taskId) || taskId <= 0) {

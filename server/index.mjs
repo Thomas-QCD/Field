@@ -19,14 +19,17 @@ const PORT = Number(process.env.API_PORT) || 3000;
  * @param {number} [status]
  */
 function sendJson(res, body, status = 200) {
-  const payload = JSON.stringify(body);
+  const buf = Buffer.from(JSON.stringify(body), "utf8");
+  // Content-Length avoids Transfer-Encoding: chunked. Chunked responses through
+  // the Vite proxy are flaky on Capacitor/WebView (net::ERR_INVALID_CHUNKED_ENCODING).
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": buf.length,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
-  res.end(payload);
+  res.end(buf);
 }
 
 /**

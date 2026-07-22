@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Group, Loader, Title, Box } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { Plus } from 'lucide-react';
 import type {
 	ColDef,
@@ -48,6 +49,7 @@ const columnDefs: ColDef<Contact>[] = [
 ];
 
 export function ContactsPage() {
+	const isMobile = useMediaQuery('(max-width: 47.9975em)');
 	const [newContactOpen, setNewContactOpen] = useState(false);
 	const [editingContact, setEditingContact] = useState<Contact | null>(null);
 	const [detailContactId, setDetailContactId] = useState<number | null>(null);
@@ -168,6 +170,7 @@ export function ContactsPage() {
 							columnDefs={columnDefs}
 							defaultColDef={defaultColDef}
 							getRowId={(p) => String(p.data.id)}
+							rowHeight={isMobile ? 40 : undefined}
 							animateRows
 							suppressCellFocus
 							suppressHorizontalScroll

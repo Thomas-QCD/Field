@@ -76,16 +76,28 @@ const columnDefs: ColDef<Task>[] = [
 	{
 		field: 'externalKey',
 		headerName: 'Job',
-		valueFormatter: (p: ValueFormatterParams<Task, string>) =>
-			p.value ? `#${p.value}` : '',
-		minWidth: 56,
-		flex: 0.6,
+		valueFormatter: (p: ValueFormatterParams<Task, string>) => {
+			const value = p.value ?? '';
+			// Look for the first sequence of 5 or 6 consecutive digits
+			const m = value.match(/\d{5,6}/);
+			if (m) return m[0];
+			return value;
+		},
+		width: 60,
+		minWidth: 60,
+		maxWidth: 60,
+		suppressSizeToFit: true,
 	},
 	{
 		field: 'taskType',
 		headerName: 'Type',
 		minWidth: 72,
 		flex: 0.5,
+		valueFormatter: (p: ValueFormatterParams<Task, string>) => {
+			const value = p.value ?? '';
+			if (value === 'Site Survey') return 'SS';
+			return value;
+		},
 	},
 	{
 		field: 'destinationAddress',
@@ -122,10 +134,10 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 	const defaultColDef = useMemo<ColDef<Task>>(
 		() => ({
 			sortable: true,
-			filter: true,
+			filter: !isMobile,
 			resizable: true,
 		}),
-		[],
+		[isMobile],
 	);
 
 	const visibleTasks = useMemo(() => {
@@ -304,6 +316,7 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 							columnDefs={columnDefs}
 							defaultColDef={defaultColDef}
 							getRowId={(p) => String(p.data.id)}
+							rowHeight={isMobile ? 40 : undefined}
 							animateRows
 							suppressCellFocus
 							suppressHorizontalScroll

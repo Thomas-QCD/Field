@@ -1,8 +1,19 @@
 import { Capacitor } from '@capacitor/core';
 
+function isLoopbackHost(hostname: string): boolean {
+	return (
+		hostname === 'localhost' ||
+		hostname === '127.0.0.1' ||
+		hostname === '[::1]'
+	);
+}
+
 /**
  * Resolve an API path for the current client.
- * - Web / Vite live-reload (DEV): relative `/api/...` (proxied to :3000)
+ * - Web on localhost (DEV): relative `/api/...` (Vite proxies to :3000)
+ * - Capacitor live-reload / LAN browser (DEV): `http://<page-host>:3000/...`
+ *   (bypasses Vite proxy — large JSON fails with ERR_INVALID_CHUNKED_ENCODING /
+ *   ERR_CONTENT_LENGTH_MISMATCH on WebView)
  * - Bundled native Android: host loopback via 10.0.2.2
  * - Bundled native iOS simulator: Mac localhost
  * Override with VITE_API_BASE (e.g. http://192.168.1.10:3000) for a physical device.
@@ -13,14 +24,26 @@ export function apiUrl(path: string): string {
 	if (override) {
 		return `${override.replace(/\/$/, '')}${p}`;
 	}
-	// Browser and Capacitor live-reload both load from Vite — use the proxy.
-	if (!Capacitor.isNativePlatform() || import.meta.env.DEV) {
-		return p;
+
+	if (import.meta.env.DEV) {
+		const host =
+			typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+		const useViteProxy =
+			!Capacitor.isNativePlatform() && isLoopbackHost(host);
+		if (useViteProxy) {
+			return p;
+		}
+		return `http://${host}:3000${p}`;
 	}
-	if (Capacitor.getPlatform() === 'android') {
-		return `http://10.0.2.2:3000${p}`;
+
+	if (Capacitor.isNativePlatform()) {
+		if (Capacitor.getPlatform() === 'android') {
+			return `http://10.0.2.2:3000${p}`;
+		}
+		return `http://127.0.0.1:3000${p}`;
 	}
-	return `http://127.0.0.1:3000${p}`;
+
+	return p;
 }
 
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {

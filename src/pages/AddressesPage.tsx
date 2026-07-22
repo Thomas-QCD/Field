@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Group, Loader, Title, Box } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { Plus } from 'lucide-react';
 import type {
 	ColDef,
@@ -55,6 +56,7 @@ const columnDefs: ColDef<Address>[] = [
 ];
 
 export function AddressesPage() {
+	const isMobile = useMediaQuery('(max-width: 47.9975em)');
 	const [newAddressOpen, setNewAddressOpen] = useState(false);
 	const [editingAddress, setEditingAddress] = useState<Address | null>(null);
 	const [detailAddressId, setDetailAddressId] = useState<number | null>(null);
@@ -177,6 +179,7 @@ export function AddressesPage() {
 							columnDefs={columnDefs}
 							defaultColDef={defaultColDef}
 							getRowId={(p) => String(p.data.id)}
+							rowHeight={isMobile ? 40 : undefined}
 							animateRows
 							suppressCellFocus
 							suppressHorizontalScroll
