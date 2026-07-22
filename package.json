@@ -14,6 +14,9 @@
     "cap:live": "node scripts/cap-live.mjs",
     "cap:android": "npm run cap:sync && npx cap open android",
     "cap:ios": "npm run cap:sync && npx cap open ios",
+    "adb:unload": "node scripts/adb-unload.mjs",
+    "adb:virtual": "node scripts/adb-target.mjs virtual",
+    "adb:physical": "node scripts/adb-target.mjs physical",
     "lint": "oxlint",
     "preview": "vite preview",
     "pdf:docket": "node scripts/generate-delivery-docket.mjs",
@@ -36,6 +39,7 @@
     "ag-grid-community": "^36.0.1",
     "ag-grid-react": "^36.0.1",
     "lucide-react": "^1.24.0",
+    "pdfjs-dist": "^6.1.200",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1"

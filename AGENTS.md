@@ -212,7 +212,7 @@ Field workforce management covers work performed outside a central office. Model
 
 Do not implement every table or field for MVP. See [`docs/database-design.md`](docs/database-design.md) for the full schema and MVP subset. Work with the user to define the minimum slice for create → assign → execute → complete.
 
-**Related tables (summary):** `users`, `addresses`, `contacts`, `tasks` (with `task_type` / `status` enums), `task_crew_members`, `task_contacts`, `task_attachments`, `task_status_events`, `task_documents`, `email_deliveries`.
+**Related tables (summary):** `users`, `addresses`, `contacts`, `tasks` (with `task_type` / `status` enums), `task_crew_members`, `task_contacts`, `task_attachments`, `task_status_events` (optional crew GPS at start/end), `task_documents`, `email_deliveries`.
 
 ### Reference system
 

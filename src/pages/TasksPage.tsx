@@ -11,6 +11,7 @@ import type {
 import { AllCommunityModule } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
 import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
+import { uploadAttachment } from '../api/attachments';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import type { Task, TaskDetail } from '../types/task';
 import {
@@ -52,11 +53,13 @@ function startTimeMs(iso: string | null): number {
 }
 
 function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
-	const contactIds = task.contacts.map((c) => c.id);
-	const poc = task.contacts.find((c) => c.isPoc);
+	// POC first so the MultiSelect pill order matches “first = POC”.
+	const contactIds = [...task.contacts]
+		.sort((a, b) => Number(b.isPoc) - Number(a.isPoc))
+		.map((c) => c.id);
 	return {
 		contactIds,
-		pocContactId: poc?.id ?? contactIds[0] ?? null,
+		pocContactId: contactIds[0] ?? null,
 		taskType: task.taskType,
 		externalKey: task.externalKey,
 		taskDesc: task.description,
@@ -195,18 +198,35 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 		return () => controller.abort();
 	}, [refreshTasks]);
 
-	const handleSaveTask = async (values: NewTaskFormValues) => {
+	const handleSaveTask = async (
+		values: NewTaskFormValues,
+		_addAnother: boolean,
+		pendingFiles: File[],
+	) => {
+		let taskId: number;
 		if (editingTask) {
 			await updateTask(editingTask.id, values);
+			taskId = editingTask.id;
 		} else {
 			if (!user) {
 				throw new Error('Select a user in the sidebar before saving a task');
 			}
-			await createTask({
+			const created = await createTask({
 				...values,
 				createdByUserId: user.id,
 			});
+			taskId = created.id;
 		}
+
+		if (pendingFiles.length > 0) {
+			if (!user) {
+				throw new Error('Select a user in the sidebar before uploading attachments');
+			}
+			for (const file of pendingFiles) {
+				await uploadAttachment(taskId, file, user.id);
+			}
+		}
+
 		await refreshTasks();
 	};
 
@@ -336,6 +356,7 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 				opened={newTaskOpen || editingTask != null}
 				onClose={handleCloseEditor}
 				initialValues={editorInitialValues}
+				taskId={editingTask?.id ?? null}
 				onSave={handleSaveTask}
 			/>
 

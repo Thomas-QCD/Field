@@ -123,6 +123,10 @@ body {
   flex-direction: column;
   box-sizing: border-box;
   min-height: 0;
+  /* Fallbacks first: some Android WebViews ignore dvh and then flex:1 grid
+     children collapse to 0 height (empty Tasks/Contacts/Addresses tables). */
+  height: 100%;
+  height: 100vh;
   height: 100dvh;
   overflow: hidden;
   padding-top: calc(

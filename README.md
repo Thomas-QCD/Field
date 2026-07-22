@@ -32,18 +32,21 @@ Writes `storage/documents/delivery-docket-{taskId}.pdf` from `scripts/fixtures/s
 The same Vite build runs inside a Capacitor shell (`app.field.mobile`).
 
 ```bash
-npm run cap:live      # point WebView at Vite (hot reload) — emulator default
-npm run cap:live -- device   # same, using this PC’s LAN IP (physical device)
+npm run adb:virtual   # drop phone ADB + live reload via 10.0.2.2 (emulator)
+npm run adb:physical  # quit emulator + live reload via LAN IP (phone)
+npm run adb:unload    # clear all ADB targets (no live-reload sync)
+npm run cap:live      # live reload only — emulator default (prefer adb:virtual)
+npm run cap:live -- device   # live reload only — phone (prefer adb:physical)
 npm run cap:sync      # production-style: build web → copy into android/ and ios/
 npm run cap:android   # sync + open Android Studio
 npm run cap:ios       # sync + open Xcode (macOS only)
 ```
 
-**Live reload (day-to-day)** — Keep `npm run dev` running, then `npm run cap:live` once and Run from Android Studio. UI edits hot-reload in the emulator; no `cap:sync` per change. Physical device: `npm run cap:live -- device` (same Wi‑Fi as the PC; allow Node through Windows Firewall if prompted). To ship/test bundled assets again, run `npm run cap:sync` (clears the live-reload URL).
+**Switching devices** — Keep `npm run dev` running, then `npm run adb:virtual` or `npm run adb:physical`. That clears the other ADB target and points the Capacitor WebView at Vite. Run Field from Android Studio on the chosen device; refresh `chrome://inspect` after. To ship/test bundled assets again, run `npm run cap:sync` (clears the live-reload URL).
 
-**Android Studio (this machine)** — Install Android Studio + an AVD (API 24+). Keep the host API up (`aws login` on this PC if RDS secrets expired, then `npm run dev`). Prefer `cap:live` for iteration, or `npm run cap:android` for a bundled build. Bundled builds reach the host API at `10.0.2.2:3000` (you do not run AWS login inside the emulator).
+**Android Studio (this machine)** — Install Android Studio + an AVD (API 24+). Keep the host API up (`aws login` on this PC if RDS secrets expired, then `npm run dev`). Prefer `adb:virtual` / `adb:physical` for iteration, or `npm run cap:android` for a bundled build. Bundled builds reach the host API at `10.0.2.2:3000` (you do not run AWS login inside the emulator).
 
-**Physical Android device** — Enable Developer options + USB debugging, connect the device, select it in Android Studio, Run. Live reload: `npm run cap:live -- device`. Bundled build API: `VITE_API_BASE=http://192.168.x.x:3000 npm run cap:sync`. If attachment uploads fail after a LAN IP change, refresh S3 CORS with `npm run s3:cors`.
+**Physical Android device** — Enable Developer options + USB debugging (or Wireless debugging), `npm run adb:physical`, select the phone in Android Studio, Run. Bundled build API: `VITE_API_BASE=http://192.168.x.x:3000 npm run cap:sync`. If attachment uploads fail after a LAN IP change, refresh S3 CORS with `npm run s3:cors`.
 
 **iOS (Mac only)** — Full walkthrough: [`docs/ios-quickstart.md`](docs/ios-quickstart.md). Short version: clone/pull, `npm install`, configure `.env`, `npm run dev`, then `npm run cap:live -- ios` and open `ios/App/App.xcworkspace` in Xcode (or `npm run cap:ios` for a bundled build). Pick an iPhone simulator → Run.
 

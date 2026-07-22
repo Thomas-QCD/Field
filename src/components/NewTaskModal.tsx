@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
 	Stack,
 	Group,
@@ -13,6 +13,8 @@ import {
 	SimpleGrid,
 	Loader,
 	Alert,
+	UnstyledButton,
+	Pill,
 } from '@mantine/core';
 import {
 	ClipboardList,
@@ -25,21 +27,26 @@ import {
 	Save,
 	X,
 	Plus,
+	Paperclip,
+	Trash2,
 } from 'lucide-react';
 import type { TaskType } from '../types/task';
+import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES } from '../api/attachments';
 import { createContact, listContacts } from '../api/contacts';
 import { createAddress, listAddresses } from '../api/addresses';
 import { listCrewUsers } from '../api/users';
 import { formatShortName } from '../formatName';
 import { KeyboardAwareModal } from './KeyboardAwareModal';
-import {
-	NewContactModal,
-	type NewContactFormValues,
-} from './NewContactModal';
-import {
-	NewAddressModal,
-	type NewAddressFormValues,
-} from './NewAddressModal';
+import { NewContactModal, type NewContactFormValues } from './NewContactModal';
+import { NewAddressModal, type NewAddressFormValues } from './NewAddressModal';
+import { TaskAttachments } from './TaskAttachments';
+
+function formatBytes(bytes: number): string {
+	if (!Number.isFinite(bytes) || bytes < 0) return '';
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
 	{ value: 'Delivery', label: 'Delivery' },
@@ -112,14 +119,9 @@ export interface NewTaskFormValues {
 	isTimeSpecific: string;
 }
 
-/** Keep POC on the task when possible; otherwise first contact. */
-function resolvePocContactId(
-	contactIds: number[],
-	currentPoc: number | null,
-): number | null {
-	if (contactIds.length === 0) return null;
-	if (currentPoc != null && contactIds.includes(currentPoc)) return currentPoc;
-	return contactIds[0];
+/** First contact in the list is always the POC. */
+function resolvePocContactId(contactIds: number[]): number | null {
+	return contactIds[0] ?? null;
 }
 
 function createEmptyForm(): NewTaskFormValues {
@@ -150,9 +152,12 @@ interface NewTaskModalProps {
 	onClose: () => void;
 	/** When set, modal is in edit mode and form is seeded from these values. */
 	initialValues?: NewTaskFormValues | null;
+	/** Existing task id — enables live attachment upload/list while editing. */
+	taskId?: number | null;
 	onSave?: (
 		values: NewTaskFormValues,
 		addAnother: boolean,
+		pendingFiles: File[],
 	) => void | Promise<void>;
 }
 
@@ -160,10 +165,15 @@ export function NewTaskModal({
 	opened,
 	onClose,
 	initialValues = null,
+	taskId = null,
 	onSave,
 }: NewTaskModalProps) {
 	const isEdit = initialValues != null;
+	const attachmentInputId = useId();
+	const attachmentInputRef = useRef<HTMLInputElement>(null);
 	const [form, setForm] = useState<NewTaskFormValues>(createEmptyForm);
+	const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+	const [attachmentError, setAttachmentError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [crewOptions, setCrewOptions] = useState<
@@ -202,6 +212,8 @@ export function NewTaskModal({
 
 	const reset = () => {
 		setForm(initialValues ? { ...initialValues } : createEmptyForm());
+		setPendingFiles([]);
+		setAttachmentError(null);
 		setSaveError(null);
 		setNewContactOpen(false);
 		setNewAddressOpen(false);
@@ -209,6 +221,30 @@ export function NewTaskModal({
 		contactDropdown.reset();
 		addressDropdown.reset();
 		crewDropdown.reset();
+		if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+	};
+
+	const addPendingFiles = (fileList: FileList | null) => {
+		const files = fileList ? Array.from(fileList) : [];
+		if (files.length === 0) return;
+		setAttachmentError(null);
+
+		const accepted: File[] = [];
+		for (const file of files) {
+			if (file.size <= 0) {
+				setAttachmentError(`“${file.name}” is empty`);
+				continue;
+			}
+			if (file.size > MAX_ATTACHMENT_BYTES) {
+				setAttachmentError(`“${file.name}” exceeds the 25 MB limit`);
+				continue;
+			}
+			accepted.push(file);
+		}
+		if (accepted.length > 0) {
+			setPendingFiles((prev) => [...prev, ...accepted]);
+		}
+		if (attachmentInputRef.current) attachmentInputRef.current.value = '';
 	};
 
 	const handleClose = () => {
@@ -236,9 +272,7 @@ export function NewTaskModal({
 			email: values.email.trim() || undefined,
 		});
 		const shortName = formatShortName(contact.name);
-		const label = contact.email
-			? `${shortName} (${contact.email})`
-			: shortName;
+		const label = contact.email ? `${shortName} (${contact.email})` : shortName;
 		setContactOptions((prev) => {
 			if (prev.some((o) => o.value === String(contact.id))) return prev;
 			return [...prev, { value: String(contact.id), label }];
@@ -249,7 +283,7 @@ export function NewTaskModal({
 			return {
 				...prev,
 				contactIds,
-				pocContactId: resolvePocContactId(contactIds, prev.pocContactId),
+				pocContactId: resolvePocContactId(contactIds),
 			};
 		});
 	};
@@ -290,13 +324,16 @@ export function NewTaskModal({
 		setSaving(true);
 		setSaveError(null);
 		try {
-			await onSave?.(form, addAnother);
+			await onSave?.(form, addAnother, pendingFiles);
 			if (addAnother) {
 				setForm(createEmptyForm());
+				setPendingFiles([]);
+				setAttachmentError(null);
 				setSaveError(null);
 				contactDropdown.reset();
 				addressDropdown.reset();
 				crewDropdown.reset();
+				if (attachmentInputRef.current) attachmentInputRef.current.value = '';
 			} else {
 				reset();
 				onClose();
@@ -311,10 +348,13 @@ export function NewTaskModal({
 	useEffect(() => {
 		if (!opened) return;
 		setForm(initialValues ? { ...initialValues } : createEmptyForm());
+		setPendingFiles([]);
+		setAttachmentError(null);
 		setSaveError(null);
 		setNewContactOpen(false);
 		setNewAddressOpen(false);
 		setAddressSeed(null);
+		if (attachmentInputRef.current) attachmentInputRef.current.value = '';
 	}, [opened, initialValues]);
 
 	useEffect(() => {
@@ -469,10 +509,7 @@ export function NewTaskModal({
 						setForm((prev) => ({
 							...prev,
 							contactIds,
-							pocContactId: resolvePocContactId(
-								contactIds,
-								prev.pocContactId,
-							),
+							pocContactId: resolvePocContactId(contactIds),
 						}));
 					}}
 					placeholder={form.contactIds.length === 0 ? 'No contacts' : undefined}
@@ -489,6 +526,28 @@ export function NewTaskModal({
 							borderRadius: 4,
 						},
 					}}
+					renderPill={({ option, onRemove }) => {
+						const isPoc =
+							form.contactIds[0] != null &&
+							String(form.contactIds[0]) === option.value;
+						return (
+							<Pill
+								withRemoveButton
+								onRemove={onRemove}
+								disabled={saving}
+								className={
+									isPoc
+										? 'task-contact-pill task-contact-pill--poc'
+										: 'task-contact-pill'
+								}
+							>
+								{option.label}
+								{isPoc ? (
+									<span className='task-contact-pill-poc'>POC</span>
+								) : null}
+							</Pill>
+						);
+					}}
 					searchable
 					clearable
 					hidePickedOptions
@@ -501,34 +560,6 @@ export function NewTaskModal({
 					}
 					disabled={saving}
 				/>
-				{form.contactIds.length > 1 ? (
-					<Select
-						size={inputSize}
-						label='Point of contact'
-						description='Defaults to the first contact added'
-						data={form.contactIds.map((id) => {
-							const option = contactOptions.find(
-								(o) => o.value === String(id),
-							);
-							return {
-								value: String(id),
-								label: option?.label ?? `Contact #${id}`,
-							};
-						})}
-						value={
-							form.pocContactId != null ? String(form.pocContactId) : null
-						}
-						onChange={(v) =>
-							update(
-								'pocContactId',
-								v != null && v !== '' ? Number(v) : form.contactIds[0] ?? null,
-							)
-						}
-						leftSection={<UserRound size={16} />}
-						allowDeselect={false}
-						disabled={saving}
-					/>
-				) : null}
 
 				<Group justify='space-between' align='center' gap={6} wrap='nowrap'>
 					<Text fz={14} fw={600}>
@@ -750,6 +781,77 @@ export function NewTaskModal({
 					/>
 				</SimpleGrid>
 				<br />
+
+				<Text fz={14} fw={600}>
+					Attachments
+				</Text>
+				{taskId != null ? (
+					<TaskAttachments taskId={taskId} />
+				) : (
+					<Stack gap='sm' className='task-attachments'>
+						{attachmentError ? (
+							<Alert
+								color='red'
+								title='Attachments'
+								withCloseButton
+								onClose={() => setAttachmentError(null)}
+								py={8}
+							>
+								{attachmentError}
+							</Alert>
+						) : null}
+
+						<ul className='task-attachments-list'>
+							{pendingFiles.map((file, index) => (
+								<li
+									key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+									className='task-attachments-item'
+								>
+									<div className='task-attachments-item-main'>
+										<Text size='sm' fw={600} lineClamp={1}>
+											{file.name}
+										</Text>
+										<Text size='xs' c='dimmed' mt={2}>
+											{formatBytes(file.size)}
+										</Text>
+									</div>
+									<UnstyledButton
+										className='task-attachments-icon-btn task-attachments-icon-btn--danger'
+										aria-label={`Remove ${file.name}`}
+										disabled={saving}
+										onClick={() =>
+											setPendingFiles((prev) =>
+												prev.filter((_, i) => i !== index),
+											)
+										}
+									>
+										<Trash2 size={16} strokeWidth={2} aria-hidden />
+									</UnstyledButton>
+								</li>
+							))}
+						</ul>
+
+						<input
+							ref={attachmentInputRef}
+							id={attachmentInputId}
+							type='file'
+							accept={ATTACHMENT_ACCEPT}
+							multiple
+							className='task-attachments-input'
+							disabled={saving}
+							onChange={(e) => addPendingFiles(e.target.files)}
+						/>
+						<Button
+							variant='light'
+							color='brand'
+							leftSection={<Paperclip size={16} />}
+							disabled={saving}
+							onClick={() => attachmentInputRef.current?.click()}
+						>
+							Add attachment
+						</Button>
+					</Stack>
+				)}
 
 				<Group justify='flex-end' gap={6} mt={4} wrap='wrap'>
 					<Button

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { UnstyledButton } from '@mantine/core';
 import { X } from 'lucide-react';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
+import { PdfPreview } from './PdfPreview';
 
 interface AttachmentViewerProps {
 	opened: boolean;
@@ -204,6 +205,15 @@ export function AttachmentViewer({
 					draggable={false}
 				/>
 			</div>
+		);
+	} else if (mimeType === 'application/pdf') {
+		content = (
+			<PdfPreview
+				url={url}
+				title={fileName}
+				fullDocument
+				className='attachment-viewer-pdf'
+			/>
 		);
 	} else {
 		content = (

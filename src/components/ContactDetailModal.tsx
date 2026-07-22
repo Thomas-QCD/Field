@@ -101,7 +101,8 @@ export function ContactDetailModal({
 		}
 	};
 
-	const title = contact?.name || (contactId != null ? `Contact #${contactId}` : 'Contact');
+	const title =
+		contact?.name || (contactId != null ? `Contact #${contactId}` : 'Contact');
 
 	return (
 		<KeyboardAwareModal

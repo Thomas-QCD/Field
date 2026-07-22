@@ -42,6 +42,8 @@ const origins = [
   "http://10.0.2.2:5173",
   "capacitor://localhost",
   "http://localhost",
+  // Capacitor Android WebView (bundled / non-live).
+  "https://localhost",
 ];
 if (lanIp) {
   origins.push(`http://${lanIp}:5173`);

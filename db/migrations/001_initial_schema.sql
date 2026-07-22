@@ -175,6 +175,10 @@ CREATE TABLE task_status_events (
   to_status_id smallint NOT NULL REFERENCES task_statuses (id),
   changed_by_user_id uuid REFERENCES users (id),
   notes text,
+  latitude numeric(10, 7),
+  longitude numeric(10, 7),
+  accuracy_meters numeric(8, 2),
+  recorded_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

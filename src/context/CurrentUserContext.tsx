@@ -66,9 +66,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
 	const user = users.find((u) => u.id === userId) ?? null;
 
 	return (
-		<CurrentUserContext.Provider
-			value={{ user, users, loading, setUserId }}
-		>
+		<CurrentUserContext.Provider value={{ user, users, loading, setUserId }}>
 			{children}
 		</CurrentUserContext.Provider>
 	);

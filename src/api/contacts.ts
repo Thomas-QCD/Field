@@ -7,9 +7,7 @@ export interface Contact {
 	email: string;
 }
 
-export async function listContacts(
-	signal?: AbortSignal,
-): Promise<Contact[]> {
+export async function listContacts(signal?: AbortSignal): Promise<Contact[]> {
 	const res = await apiFetch('/api/contacts', { signal });
 	const data = (await res.json().catch(() => ({}))) as {
 		contacts?: Contact[];

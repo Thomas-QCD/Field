@@ -8,9 +8,7 @@ export interface Address {
 	notes: string;
 }
 
-export async function listAddresses(
-	signal?: AbortSignal,
-): Promise<Address[]> {
+export async function listAddresses(signal?: AbortSignal): Promise<Address[]> {
 	const res = await apiFetch('/api/addresses', { signal });
 	const data = (await res.json().catch(() => ({}))) as {
 		addresses?: Address[];

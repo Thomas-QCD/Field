@@ -371,6 +371,7 @@ export function TaskDetailModal({
 						<TaskAttachments
 							taskId={task.id}
 							initialAttachments={task.attachments}
+							variant='plain'
 						/>
 					</Section>
 

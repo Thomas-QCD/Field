@@ -9,7 +9,7 @@ Normalized relational schema for Field, derived from the flat task export in [`t
 - **Relational database** — PostgreSQL (local Docker in dev; RDS on AWS in production).
 - **Primary keys** — `bigint` identity for internal entities; `uuid` for users (Cognito `sub` for web-authenticated users).
 - **Timestamps** — `timestamptz` stored in UTC.
-- **Coordinates** — `numeric` latitude/longitude on `addresses` (not comma-separated strings).
+- **Coordinates** — `numeric` latitude/longitude on `addresses` (destination). Crew start/end geotags live on `task_status_events` (nullable lat/lng + accuracy).
 - **No teams** — company-local workforce; tasks are assigned to individual **crew members** only. Reference `AssignedToTeamId` is ignored. Field does not use the word "driver".
 - **Task type / status** — PostgreSQL enums (`task_type`, `task_status`) stored as text labels on `tasks` (e.g. `Delivery`, `Loaded`). No FK from `tasks` to lookup tables.
 - **No dispatch address** — destination only; `dispatch_address_id` is not modeled.
@@ -418,7 +418,7 @@ Log of automatic outbound emails. See [`critical-features.md`](critical-features
 
 ### `task_status_events`
 
-Append-only audit log for status changes (and optional assignment changes).
+Append-only audit log for status changes (and optional assignment changes). Nullable geo columns store the crew member’s GPS when starting or ending a task (e.g. transitions to `Arrived` / `Completed`). Compare to `addresses.latitude` / `longitude` via `tasks.destination_address_id` in the application (Haversine; PostGIS optional later).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -428,9 +428,15 @@ Append-only audit log for status changes (and optional assignment changes).
 | `to_status_id` | `smallint` | FK → `task_statuses.id`, NOT NULL |
 | `changed_by_user_id` | `uuid` | FK → `users.id`, nullable | system if null |
 | `notes` | `text` | nullable | |
+| `latitude` | `numeric(10,7)` | nullable | crew GPS at this status change |
+| `longitude` | `numeric(10,7)` | nullable | crew GPS at this status change |
+| `accuracy_meters` | `numeric(8,2)` | nullable | device-reported fix accuracy |
+| `recorded_at` | `timestamptz` | nullable | client capture time if different from `created_at` |
 | `created_at` | `timestamptz` | NOT NULL | |
 
 **Index:** `(task_id, created_at)`
+
+**Migration:** [`018_task_status_events_geotag.sql`](../db/migrations/018_task_status_events_geotag.sql)
 
 ---
 
@@ -460,7 +466,7 @@ Append-only audit log for status changes (and optional assignment changes).
 | Photos (in `TaskDesc` instructions) | `task_attachments` at completion |
 | Generated PDFs | `task_documents` — `shipping_label`, `delivery_docket`, `pod` |
 | Automatic emails | `email_deliveries` |
-| Status history | `task_status_events` |
+| Status history / crew geotags at start–end | `task_status_events` (optional `latitude` / `longitude` / `accuracy_meters` / `recorded_at`) |
 
 ---
 
@@ -537,7 +543,7 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | `task_attachments` | Yes — photo proof on completion |
 | `task_documents` | Yes — PDF label, docket, POD |
 | `email_deliveries` | Yes — automatic email log |
-| `task_status_events` | Recommended — cheap audit trail |
+| `task_status_events` | Recommended — cheap audit trail; crew GPS on start/end transitions |
 
 ---
 
@@ -567,3 +573,4 @@ Use storage and email abstractions so `storage_key` works for both local paths a
 - Unique constraint on `external_key` (per integration source)?
 - Soft-delete (`deleted_at`) on users? (tasks, contacts, addresses use `deleted_at`)
 - Timezone display: store UTC only; client converts?
+- Geofence: max distance (meters) from destination for valid start/end geotag; enforce vs warn-only?

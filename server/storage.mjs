@@ -73,12 +73,13 @@ export async function presignPut({ storageKey, mimeType, expiresIn = 900 }) {
 }
 
 /**
- * @param {{ storageKey: string, fileName?: string | null, disposition?: 'inline' | 'attachment', expiresIn?: number }} opts
+ * @param {{ storageKey: string, fileName?: string | null, disposition?: 'inline' | 'attachment', contentType?: string | null, expiresIn?: number }} opts
  */
 export async function presignGet({
   storageKey,
   fileName = null,
   disposition = "attachment",
+  contentType = null,
   expiresIn = 300,
 }) {
   /** @type {import('@aws-sdk/client-s3').GetObjectCommandInput} */
@@ -90,6 +91,9 @@ export async function presignGet({
     const safe = sanitizeFileName(fileName);
     const mode = disposition === "inline" ? "inline" : "attachment";
     input.ResponseContentDisposition = `${mode}; filename="${safe}"`;
+  }
+  if (contentType) {
+    input.ResponseContentType = contentType;
   }
   const command = new GetObjectCommand(input);
   const downloadUrl = await getSignedUrl(getClient(), command, { expiresIn });

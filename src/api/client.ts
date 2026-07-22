@@ -2,9 +2,7 @@ import { Capacitor } from '@capacitor/core';
 
 function isLoopbackHost(hostname: string): boolean {
 	return (
-		hostname === 'localhost' ||
-		hostname === '127.0.0.1' ||
-		hostname === '[::1]'
+		hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
 	);
 }
 
@@ -28,8 +26,7 @@ export function apiUrl(path: string): string {
 	if (import.meta.env.DEV) {
 		const host =
 			typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-		const useViteProxy =
-			!Capacitor.isNativePlatform() && isLoopbackHost(host);
+		const useViteProxy = !Capacitor.isNativePlatform() && isLoopbackHost(host);
 		if (useViteProxy) {
 			return p;
 		}

@@ -324,6 +324,7 @@ export async function getAttachmentDownloadUrl(
     storageKey: row.storage_key,
     fileName: row.file_name,
     disposition: opts.inline ? "inline" : "attachment",
+    contentType: row.mime_type || null,
   });
   return {
     downloadUrl,

@@ -255,7 +255,7 @@ function TaskViewBody({
 
 			<div className='task-view-row'>
 				<Field
-					label='Can install early'
+					label='Can start early'
 					value={task.canStartEarly ? 'Yes' : 'No'}
 				/>
 				<Field

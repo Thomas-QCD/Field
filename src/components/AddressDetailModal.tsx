@@ -133,11 +133,7 @@ export function AddressDetailModal({
 					<SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
 						<DetailField label='Name' value={address.addressName} />
 						<DetailField label='Building' value={address.building} />
-						<DetailField
-							label='Street'
-							value={address.streetLine}
-							span={2}
-						/>
+						<DetailField label='Street' value={address.streetLine} span={2} />
 						<DetailField label='Notes' value={address.notes} span={2} />
 					</SimpleGrid>
 

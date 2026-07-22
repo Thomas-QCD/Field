@@ -70,9 +70,7 @@ export interface CreatedTask {
 	crewMemberIds: string[];
 }
 
-export async function createTask(
-	input: CreateTaskInput,
-): Promise<CreatedTask> {
+export async function createTask(input: CreateTaskInput): Promise<CreatedTask> {
 	const res = await apiFetch('/api/tasks', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },

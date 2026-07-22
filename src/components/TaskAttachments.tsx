@@ -23,6 +23,7 @@ import { formatShortName } from '../formatName';
 import { formatTimeAgo } from '../formatTime';
 import type { TaskAttachment } from '../types/task';
 import { AttachmentViewer } from './AttachmentViewer';
+import { PdfPreview } from './PdfPreview';
 
 function formatBytes(bytes: number | null): string {
 	if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '';
@@ -374,11 +375,10 @@ export function TaskAttachments({
 																className='task-attachments-preview-media'
 															/>
 														) : attachment.mimeType === 'application/pdf' ? (
-															<iframe
+															<PdfPreview
+																url={url}
 																title={label}
-																src={url}
 																className='task-attachments-preview-pdf'
-																tabIndex={-1}
 															/>
 														) : (
 															<iframe
@@ -448,9 +448,7 @@ export function TaskAttachments({
 				<AttachmentViewer
 					opened={viewerAttachment != null}
 					url={
-						viewerAttachment
-							? (previewUrls[viewerAttachment.id] ?? null)
-							: null
+						viewerAttachment ? (previewUrls[viewerAttachment.id] ?? null) : null
 					}
 					mimeType={viewerAttachment?.mimeType ?? ''}
 					fileName={
