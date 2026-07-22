@@ -10,8 +10,9 @@ import {
 	Phone,
 	Play,
 } from 'lucide-react';
-import { getTask, updateTaskStatus } from '../api/tasks';
+import { getTask, createCrewEvent, type CrewEventType } from '../api/tasks';
 import { TaskAttachments } from '../components/TaskAttachments';
+import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
@@ -111,44 +112,81 @@ function ActionButton({
 	);
 }
 
-function canStartTask(status: TaskStatus): boolean {
-	return status === 'Assigned' || status === 'Loaded';
+function isTerminalStatus(status: TaskStatus): boolean {
+	return status === 'Completed' || status === 'Failed' || status === 'Cancelled';
 }
 
-function canEndTask(status: TaskStatus): boolean {
-	return status === 'Arrived';
+async function captureGeo(): Promise<{
+	latitude?: number;
+	longitude?: number;
+	accuracyMeters?: number;
+	recordedAt: string;
+}> {
+	const recordedAt = new Date().toISOString();
+	if (!navigator.geolocation) return { recordedAt };
+
+	try {
+		const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+			navigator.geolocation.getCurrentPosition(resolve, reject, {
+				enableHighAccuracy: true,
+				timeout: 5000,
+				maximumAge: 30_000,
+			});
+		});
+		return {
+			latitude: pos.coords.latitude,
+			longitude: pos.coords.longitude,
+			accuracyMeters: pos.coords.accuracy,
+			recordedAt,
+		};
+	} catch {
+		return { recordedAt };
+	}
 }
 
 function TaskViewBody({
 	task,
-	onStatusChange,
+	userId,
+	onCrewEvent,
 }: {
 	task: TaskDetail;
-	onStatusChange: (status: TaskStatus) => Promise<void>;
+	userId: string | null;
+	onCrewEvent: (eventType: CrewEventType) => Promise<void>;
 }) {
 	const cameraInputRef = useRef<HTMLInputElement>(null);
-	const [statusBusy, setStatusBusy] = useState(false);
-	const [statusError, setStatusError] = useState<string | null>(null);
+	const [eventBusy, setEventBusy] = useState(false);
+	const [eventError, setEventError] = useState<string | null>(null);
 	const address = task.destinationAddress.trim();
 	const destinationName = task.destinationAddressName.trim();
 	const canNavigate = Boolean(address);
+
+	const me = userId
+		? task.crewMembers.find((m) => m.id === userId)
+		: undefined;
+	const canStart =
+		Boolean(me) && !me?.startedAt && !isTerminalStatus(task.status);
+	const canEnd =
+		Boolean(me?.startedAt) &&
+		!me?.endedAt &&
+		task.status !== 'Failed' &&
+		task.status !== 'Cancelled';
 
 	const openCamera = () => {
 		cameraInputRef.current?.click();
 	};
 
-	const changeStatus = async (status: TaskStatus) => {
-		if (statusBusy) return;
-		setStatusBusy(true);
-		setStatusError(null);
+	const logCrewEvent = async (eventType: CrewEventType) => {
+		if (eventBusy) return;
+		setEventBusy(true);
+		setEventError(null);
 		try {
-			await onStatusChange(status);
+			await onCrewEvent(eventType);
 		} catch (err: unknown) {
-			setStatusError(
-				err instanceof Error ? err.message : 'Failed to update status',
+			setEventError(
+				err instanceof Error ? err.message : 'Failed to update check-in',
 			);
 		} finally {
-			setStatusBusy(false);
+			setEventBusy(false);
 		}
 	};
 
@@ -167,32 +205,32 @@ function TaskViewBody({
 				<ActionButton
 					label='Navigate'
 					icon={Navigation}
-					disabled={!canNavigate || statusBusy}
+					disabled={!canNavigate || eventBusy}
 					onClick={() => openMapsNavigation(address)}
 				/>
 				<ActionButton
 					label='Start task'
 					icon={Play}
-					disabled={!canStartTask(task.status) || statusBusy}
-					onClick={() => void changeStatus('Arrived')}
+					disabled={!canStart || eventBusy}
+					onClick={() => void logCrewEvent('started')}
 				/>
 				<ActionButton
 					label='End task'
 					icon={CheckCircle}
-					disabled={!canEndTask(task.status) || statusBusy}
-					onClick={() => void changeStatus('Completed')}
+					disabled={!canEnd || eventBusy}
+					onClick={() => void logCrewEvent('ended')}
 				/>
 				<ActionButton
 					label='Photo'
 					icon={Camera}
-					disabled={statusBusy}
+					disabled={eventBusy}
 					onClick={openCamera}
 				/>
 			</div>
 
-			{statusError ? (
-				<Alert color='red' title='Status update failed'>
-					{statusError}
+			{eventError ? (
+				<Alert color='red' title='Check-in failed'>
+					{eventError}
 				</Alert>
 			) : null}
 
@@ -281,6 +319,7 @@ export function TaskViewPage() {
 	const { taskId: taskIdParam } = useParams();
 	const navigate = useNavigate();
 	const location = useLocation();
+	const { user } = useCurrentUser();
 	const taskId = Number(taskIdParam);
 
 	const [task, setTask] = useState<TaskDetail | null>(null);
@@ -326,18 +365,38 @@ export function TaskViewPage() {
 		return () => controller.abort();
 	}, [taskId]);
 
-	const handleStatusChange = async (status: TaskStatus) => {
-		if (!task) return;
-		const updated = await updateTaskStatus(task.id, status);
+	const handleCrewEvent = async (eventType: CrewEventType) => {
+		if (!task || !user) {
+			throw new Error('Select a user before starting or ending a task');
+		}
+		const geo = await captureGeo();
+		const { event, task: updated } = await createCrewEvent(task.id, {
+			userId: user.id,
+			eventType,
+			latitude: geo.latitude ?? null,
+			longitude: geo.longitude ?? null,
+			accuracyMeters: geo.accuracyMeters ?? null,
+			recordedAt: geo.recordedAt,
+		});
 		setTask((prev) =>
 			prev
 				? {
 						...prev,
 						status: updated.status,
-						completedAt:
-							updated.status === 'Completed'
-								? (prev.completedAt ?? new Date().toISOString())
-								: prev.completedAt,
+						completedAt: updated.completedAt,
+						crewMembers: prev.crewMembers.map((m) =>
+							m.id === user.id
+								? {
+										...m,
+										startedAt:
+											eventType === 'started'
+												? event.recordedAt
+												: m.startedAt,
+										endedAt:
+											eventType === 'ended' ? event.recordedAt : m.endedAt,
+									}
+								: m,
+						),
 					}
 				: prev,
 		);
@@ -378,7 +437,11 @@ export function TaskViewPage() {
 					{error}
 				</Alert>
 			) : task ? (
-				<TaskViewBody task={task} onStatusChange={handleStatusChange} />
+				<TaskViewBody
+					task={task}
+					userId={user?.id ?? null}
+					onCrewEvent={handleCrewEvent}
+				/>
 			) : null}
 		</Box>
 	);

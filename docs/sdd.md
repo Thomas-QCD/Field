@@ -246,7 +246,12 @@ completed     → (terminal)
 failed        → (terminal)
 ```
 
-Confirm with operations before enforcing in code.
+**Crew Start / End** (separate from admin status PATCH): each assigned crew member logs at most one `started` and one `ended` in `task_crew_events` (time + optional GPS). Task status is derived:
+
+- First crew **Start** → `Arrived` (unless already Arrived or terminal)
+- When every crew member who **Started** has also **Ended** → `Completed` (assigned crew who never started do not block)
+
+Confirm remaining admin transitions with operations before enforcing in code.
 
 ### 5.5 Key entities
 
@@ -260,6 +265,7 @@ Confirm with operations before enforcing in code.
 | `tasks`                           | Core work unit                                    |
 | `task_contacts`                 | Contacts assigned to a task (0..many)             |
 | `task_crew_members`               | Crew assigned to a task (0..many)                 |
+| `task_crew_events`                | Per-crew start/end check-ins (time + GPS)         |
 | `task_attachments`                | Photos, signatures (S3)                           |
 | `task_documents`                  | Generated PDFs (S3)                               |
 | `email_deliveries`                | Outbound email audit log                          |
@@ -302,6 +308,8 @@ erDiagram
     users ||--o{ mobile_devices : owns
     mobile_activation_codes ||--o| mobile_devices : redeems
     tasks ||--o{ task_crew_members : has_crew
+    users ||--o{ task_crew_events : starts_ends
+    tasks ||--o{ task_crew_events : crew_checkins
     contacts ||--o{ task_contacts : contact_on
     tasks ||--o{ task_contacts : has_contacts
     addresses ||--o| tasks : destination
@@ -502,6 +510,7 @@ Backend framework and OpenAPI spec are **not yet written**. Planned resource gro
 | ---------------------- | ----------------------------------- |
 | `/tasks`               | List, create, get, update, assign   |
 | `/tasks/:id/status`    | Transition status (with validation) |
+| `/tasks/:id/crew-events` | Log crew start/end (time + GPS)   |
 | `/tasks/:id/documents` | List, generate, download PDFs       |
 | `/users`               | List crew members, manage (admin)   |
 | `/contacts`          | CRUD contacts                       |
@@ -513,7 +522,7 @@ Backend framework and OpenAPI spec are **not yet written**. Planned resource gro
 | `/mobile/activate`              | Exchange QR activation code for device session  |
 | `/mobile/tasks`                 | List tasks assigned to session `userId`         |
 | `/mobile/tasks/:id`             | Get task detail (403 if not assigned to caller) |
-| `/mobile/tasks/:id/status`      | Update status (assigned tasks only)             |
+| `/mobile/tasks/:id/crew-events` | Log start/end for session user                  |
 | `/mobile/tasks/:id/attachments` | Upload photo (presigned URL flow)               |
 
 `/mobile/activate` is unauthenticated (code is the credential). All other mobile endpoints require a valid, non-revoked device session token.

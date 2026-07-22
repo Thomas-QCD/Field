@@ -141,6 +141,57 @@ export async function updateTaskStatus(
 	return data.task;
 }
 
+export type CrewEventType = 'started' | 'ended';
+
+export interface CreateCrewEventInput {
+	userId: string;
+	eventType: CrewEventType;
+	latitude?: number | null;
+	longitude?: number | null;
+	accuracyMeters?: number | null;
+	recordedAt?: string;
+}
+
+export interface CrewEvent {
+	id: number;
+	taskId: number;
+	userId: string;
+	eventType: CrewEventType;
+	latitude: number | null;
+	longitude: number | null;
+	accuracyMeters: number | null;
+	recordedAt: string;
+	createdAt: string;
+}
+
+export async function createCrewEvent(
+	taskId: number,
+	input: CreateCrewEventInput,
+): Promise<{
+	event: CrewEvent;
+	task: { id: number; status: TaskStatus; completedAt: string | null };
+}> {
+	const res = await apiFetch(`/api/tasks/${taskId}/crew-events`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(input),
+	});
+
+	const data = (await res.json().catch(() => ({}))) as {
+		event?: CrewEvent;
+		task?: { id: number; status: TaskStatus; completedAt: string | null };
+		error?: string;
+	};
+
+	if (!res.ok) {
+		throw new Error(data.error ?? `Crew event failed (${res.status})`);
+	}
+	if (!data.event || !data.task) {
+		throw new Error('Crew event failed: empty response');
+	}
+	return { event: data.event, task: data.task };
+}
+
 export async function deleteTask(id: number): Promise<void> {
 	const res = await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
 	if (!res.ok) {

@@ -9,7 +9,7 @@ Normalized relational schema for Field, derived from the flat task export in [`t
 - **Relational database** — PostgreSQL (local Docker in dev; RDS on AWS in production).
 - **Primary keys** — `bigint` identity for internal entities; `uuid` for users (Cognito `sub` for web-authenticated users).
 - **Timestamps** — `timestamptz` stored in UTC.
-- **Coordinates** — `numeric` latitude/longitude on `addresses` (destination). Crew start/end geotags live on `task_status_events` (nullable lat/lng + accuracy).
+- **Coordinates** — `numeric` latitude/longitude on `addresses` (destination). Crew start/end geotags live on `task_crew_events` (nullable lat/lng + accuracy). Optional geo on `task_status_events` for status-change audit.
 - **No teams** — company-local workforce; tasks are assigned to individual **crew members** only. Reference `AssignedToTeamId` is ignored. Field does not use the word "driver".
 - **Task type / status** — PostgreSQL enums (`task_type`, `task_status`) stored as text labels on `tasks` (e.g. `Delivery`, `Loaded`). No FK from `tasks` to lookup tables.
 - **No dispatch address** — destination only; `dispatch_address_id` is not modeled.
@@ -35,6 +35,8 @@ erDiagram
     tasks ||--o{ task_attachments : "has"
 
     users ||--o{ task_status_events : "changed by"
+    users ||--o{ task_crew_events : "starts/ends"
+    tasks ||--o{ task_crew_events : "crew check-ins"
     users ||--o{ task_attachments : "uploaded by"
 ```
 
@@ -49,7 +51,7 @@ erDiagram
 | Contacts | `contacts` | People (name, phone, email) — not venues |
 | Task reference data | `task_types`, `task_statuses`, `task_status_transitions` | Optional lookup / workflow metadata (tasks store enums directly) |
 | Core | `tasks`, `task_crew_members`, `task_contacts` | Primary unit of work; crew + contacts + optional destination |
-| Task extensions | `task_attachments`, `task_status_events`, `task_documents`, `email_deliveries` | Photos, audit, PDFs, outbound email log |
+| Task extensions | `task_attachments`, `task_crew_events`, `task_status_events`, `task_documents`, `email_deliveries` | Photos, crew start/end logs, status audit, PDFs, outbound email log |
 
 ---
 
@@ -416,9 +418,34 @@ Log of automatic outbound emails. See [`critical-features.md`](critical-features
 
 **Index:** `(task_id, created_at)`, `(status)` where pending retry
 
+### `task_crew_events`
+
+Append-only per-crew start/end check-in log (one `started` and one `ended` per user per task). Stores when and where each assigned crew member began and finished work. Does **not** replace task status — the service derives status from these events:
+
+- First `started` on the task → `tasks.status = Arrived` (unless already `Arrived` / terminal)
+- When every user with a `started` also has an `ended` → `tasks.status = Completed` + `completed_at` (assigned crew who never started do not block)
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `bigint` | PK |
+| `task_id` | `bigint` | FK → `tasks.id`, NOT NULL |
+| `user_id` | `uuid` | FK → `users.id`, NOT NULL | must be in `task_crew_members` |
+| `event_type` | `varchar(20)` | NOT NULL | `started` \| `ended` |
+| `latitude` | `numeric(10,7)` | nullable | crew GPS at check-in |
+| `longitude` | `numeric(10,7)` | nullable | crew GPS at check-in |
+| `accuracy_meters` | `numeric(8,2)` | nullable | device-reported fix accuracy |
+| `recorded_at` | `timestamptz` | NOT NULL | client capture time (defaults to now) |
+| `created_at` | `timestamptz` | NOT NULL | |
+
+**Unique:** `(task_id, user_id, event_type)` — one start and one end per crew member.
+
+**Index:** `(task_id, recorded_at)`
+
+**Migration:** [`019_task_crew_events.sql`](../db/migrations/019_task_crew_events.sql)
+
 ### `task_status_events`
 
-Append-only audit log for status changes (and optional assignment changes). Nullable geo columns store the crew member’s GPS when starting or ending a task (e.g. transitions to `Arrived` / `Completed`). Compare to `addresses.latitude` / `longitude` via `tasks.destination_address_id` in the application (Haversine; PostGIS optional later).
+Append-only audit log for status changes (and optional assignment changes). Nullable geo columns for GPS at a status change if recorded. Crew start/end location belongs on `task_crew_events`. Compare destination coords via `tasks.destination_address_id` in the application (Haversine; PostGIS optional later).
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -428,8 +455,8 @@ Append-only audit log for status changes (and optional assignment changes). Null
 | `to_status_id` | `smallint` | FK → `task_statuses.id`, NOT NULL |
 | `changed_by_user_id` | `uuid` | FK → `users.id`, nullable | system if null |
 | `notes` | `text` | nullable | |
-| `latitude` | `numeric(10,7)` | nullable | crew GPS at this status change |
-| `longitude` | `numeric(10,7)` | nullable | crew GPS at this status change |
+| `latitude` | `numeric(10,7)` | nullable | GPS at this status change |
+| `longitude` | `numeric(10,7)` | nullable | GPS at this status change |
 | `accuracy_meters` | `numeric(8,2)` | nullable | device-reported fix accuracy |
 | `recorded_at` | `timestamptz` | nullable | client capture time if different from `created_at` |
 | `created_at` | `timestamptz` | NOT NULL | |
@@ -466,7 +493,8 @@ Append-only audit log for status changes (and optional assignment changes). Null
 | Photos (in `TaskDesc` instructions) | `task_attachments` at completion |
 | Generated PDFs | `task_documents` — `shipping_label`, `delivery_docket`, `pod` |
 | Automatic emails | `email_deliveries` |
-| Status history / crew geotags at start–end | `task_status_events` (optional `latitude` / `longitude` / `accuracy_meters` / `recorded_at`) |
+| Crew start/end time + geotags | `task_crew_events` |
+| Status history | `task_status_events` |
 
 ---
 
@@ -543,7 +571,8 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | `task_attachments` | Yes — photo proof on completion |
 | `task_documents` | Yes — PDF label, docket, POD |
 | `email_deliveries` | Yes — automatic email log |
-| `task_status_events` | Recommended — cheap audit trail; crew GPS on start/end transitions |
+| `task_crew_events` | Yes — per-crew start/end logs; derives Arrived / Completed |
+| `task_status_events` | Recommended — status-change audit trail |
 
 ---
 

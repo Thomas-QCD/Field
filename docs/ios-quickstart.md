@@ -58,7 +58,15 @@ Ask a teammate for the current password (or Secrets Manager value) so you do not
 
 Your Mac must be able to reach RDS `field-dev` (security group allows your public IP). Ask a teammate if the SG needs updating.
 
-S3 attachments still need AWS credentials later (`aws login` / SSO). Database-only testing does not.
+**Attachments (S3) need AWS credentials on the Mac**, even when `DATABASE_URL` already has the DB password. Tasks/contacts can work without AWS CLI; uploads and PDF/image previews will not. Before testing attachments:
+
+```bash
+aws login
+# or: aws sso login --profile <your-profile>
+aws sts get-caller-identity   # should print your account/user
+```
+
+Then restart `npm run dev` so the API picks up the session. Do not put long-lived access keys in `.env`.
 
 Optional first-time schema (empty tables):
 
@@ -177,6 +185,7 @@ npm run s3:cors
 | Blank WebView / can’t reach Vite | Use `npm run cap:live -- ios` (Simulator → `127.0.0.1`), not Android’s `10.0.2.2` |
 | `ENOENT` … `android/.../assets/capacitor.config.json` | Old `cap:live` synced Android too. Use `npm run cap:live -- ios`, or `mkdir -p android/app/src/main/assets` then retry |
 | API errors on device | Set `VITE_API_BASE=http://<mac-lan-ip>:3000` for bundled builds; phone and Mac on same Wi‑Fi |
+| Tasks/contacts work, but attachments fail with **Could not load credentials from any providers** | Not an iOS misconfig. The Mac API needs AWS credentials to presign S3 URLs (DB can work from `DATABASE_URL` alone). On the Mac: `aws login` (or SSO login for your profile), confirm `aws sts get-caller-identity`, then restart `npm run dev`. |
 | RDS connection refused | Re-login AWS; confirm SG allows this Mac’s public IP; check `DATABASE_URL` |
 | Signing error on device | Xcode → Signing & Capabilities → choose your Team |
 | Stale live-reload URL | `npm run cap:sync` clears it and restores bundled `dist/` |

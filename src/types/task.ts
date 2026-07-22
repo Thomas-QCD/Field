@@ -33,6 +33,8 @@ export interface Task {
 export interface TaskCrewMember {
   id: string;
   displayName: string;
+  startedAt: string | null;
+  endedAt: string | null;
 }
 
 export interface TaskContact {

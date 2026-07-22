@@ -605,9 +605,238 @@ const STATUS_TRANSITIONS = {
   Cancelled: [],
 };
 
+const TERMINAL_STATUSES = new Set(["Completed", "Failed", "Cancelled"]);
+
 /**
- * Update task status with draft transition rules.
- * Start Task → Arrived; End Task → Completed (completed_at set).
+ * Log a per-crew start/end event and derive task status:
+ * - First Start → Arrived (unless already Arrived / terminal)
+ * - All starters have Ended → Completed + completed_at
+ *
+ * @param {number} taskId
+ * @param {Record<string, unknown>} body
+ */
+export async function createCrewEvent(taskId, body) {
+  if (!Number.isInteger(taskId) || taskId < 1) {
+    throw Object.assign(new Error("Invalid task id"), { status: 400 });
+  }
+
+  const userId = asString(body.userId);
+  if (!userId) {
+    throw Object.assign(new Error("userId is required"), { status: 400 });
+  }
+
+  const eventType = asString(body.eventType);
+  if (eventType !== "started" && eventType !== "ended") {
+    throw Object.assign(
+      new Error(`Invalid eventType: ${eventType || "(empty)"}`),
+      { status: 400 },
+    );
+  }
+
+  const latitude = asOptionalNumber(body.latitude);
+  const longitude = asOptionalNumber(body.longitude);
+  const accuracyMeters = asOptionalNumber(body.accuracyMeters);
+  let recordedAt;
+  try {
+    recordedAt = asOptionalDateTime(body.recordedAt) ?? new Date().toISOString();
+  } catch (err) {
+    throw Object.assign(
+      err instanceof Error ? err : new Error(String(err)),
+      { status: 400 },
+    );
+  }
+
+  if (
+    (latitude != null && (latitude < -90 || latitude > 90)) ||
+    (longitude != null && (longitude < -180 || longitude > 180))
+  ) {
+    throw Object.assign(new Error("Invalid latitude/longitude"), {
+      status: 400,
+    });
+  }
+
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query(
+      `SELECT id, status, completed_at
+       FROM tasks
+       WHERE id = $1 AND deleted_at IS NULL
+       FOR UPDATE`,
+      [taskId],
+    );
+    if (existing.rowCount === 0) {
+      throw Object.assign(new Error("Task not found"), { status: 404 });
+    }
+
+    const fromStatus = existing.rows[0].status;
+    if (TERMINAL_STATUSES.has(fromStatus) && fromStatus !== "Completed") {
+      throw Object.assign(
+        new Error(`Cannot log crew event on ${fromStatus} task`),
+        { status: 409 },
+      );
+    }
+    if (fromStatus === "Completed" && eventType === "started") {
+      throw Object.assign(new Error("Cannot start a Completed task"), {
+        status: 409,
+      });
+    }
+
+    const assigned = await client.query(
+      `SELECT 1 FROM task_crew_members WHERE task_id = $1 AND user_id = $2`,
+      [taskId, userId],
+    );
+    if (assigned.rowCount === 0) {
+      throw Object.assign(
+        new Error("User is not assigned to this task"),
+        { status: 403 },
+      );
+    }
+
+    if (eventType === "ended") {
+      const started = await client.query(
+        `SELECT 1 FROM task_crew_events
+         WHERE task_id = $1 AND user_id = $2 AND event_type = 'started'`,
+        [taskId, userId],
+      );
+      if (started.rowCount === 0) {
+        throw Object.assign(
+          new Error("Cannot end task before starting"),
+          { status: 409 },
+        );
+      }
+    }
+
+    let eventRow;
+    try {
+      const inserted = await client.query(
+        `INSERT INTO task_crew_events (
+           task_id, user_id, event_type,
+           latitude, longitude, accuracy_meters, recorded_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
+         RETURNING
+           id, task_id, user_id, event_type,
+           latitude, longitude, accuracy_meters,
+           recorded_at, created_at`,
+        [
+          taskId,
+          userId,
+          eventType,
+          latitude,
+          longitude,
+          accuracyMeters,
+          recordedAt,
+        ],
+      );
+      eventRow = inserted.rows[0];
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "23505") {
+        throw Object.assign(
+          new Error(
+            eventType === "started"
+              ? "Already started this task"
+              : "Already ended this task",
+          ),
+          { status: 409 },
+        );
+      }
+      throw err;
+    }
+
+    let nextStatus = fromStatus;
+    let completedAt = existing.rows[0].completed_at
+      ? new Date(existing.rows[0].completed_at).toISOString()
+      : null;
+
+    if (eventType === "started") {
+      if (
+        fromStatus !== "Arrived" &&
+        !TERMINAL_STATUSES.has(fromStatus)
+      ) {
+        nextStatus = "Arrived";
+        await client.query(
+          `UPDATE tasks
+           SET status = 'Arrived'::task_status,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [taskId],
+        );
+      }
+    } else {
+      const counts = await client.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE event_type = 'started')::int AS started_count,
+           COUNT(*) FILTER (WHERE event_type = 'ended')::int AS ended_count
+         FROM task_crew_events
+         WHERE task_id = $1`,
+        [taskId],
+      );
+      const startedCount = counts.rows[0].started_count;
+      const endedCount = counts.rows[0].ended_count;
+      if (
+        startedCount > 0 &&
+        startedCount === endedCount &&
+        fromStatus !== "Completed" &&
+        fromStatus !== "Failed" &&
+        fromStatus !== "Cancelled"
+      ) {
+        const updated = await client.query(
+          `UPDATE tasks
+           SET status = 'Completed'::task_status,
+               completed_at = COALESCE(completed_at, NOW()),
+               updated_at = NOW()
+           WHERE id = $1
+           RETURNING completed_at`,
+          [taskId],
+        );
+        nextStatus = "Completed";
+        completedAt = new Date(updated.rows[0].completed_at).toISOString();
+      }
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      event: {
+        id: Number(eventRow.id),
+        taskId: Number(eventRow.task_id),
+        userId: String(eventRow.user_id),
+        eventType: eventRow.event_type,
+        latitude:
+          eventRow.latitude != null ? Number(eventRow.latitude) : null,
+        longitude:
+          eventRow.longitude != null ? Number(eventRow.longitude) : null,
+        accuracyMeters:
+          eventRow.accuracy_meters != null
+            ? Number(eventRow.accuracy_meters)
+            : null,
+        recordedAt: new Date(eventRow.recorded_at).toISOString(),
+        createdAt: new Date(eventRow.created_at).toISOString(),
+      },
+      task: {
+        id: taskId,
+        status: nextStatus,
+        completedAt,
+      },
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // ignore rollback errors
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Update task status with draft transition rules (admin / manual).
+ * Crew Start/End use createCrewEvent instead.
  *
  * @param {number} taskId
  * @param {Record<string, unknown>} body

@@ -8,9 +8,11 @@ import {
 	ClipboardCheck,
 	ClipboardList,
 	Contact,
+	Map,
 	MapPinned,
 	Menu,
 } from 'lucide-react';
+import { useCurrentUser } from '../context/CurrentUserContext';
 import { UserSelect } from './UserSelect';
 
 const navLinkStyles = {
@@ -37,6 +39,8 @@ function isNavActive(pathname: string, to: string, end: boolean) {
 
 export function FieldAppShell() {
 	const location = useLocation();
+	const { user } = useCurrentUser();
+	const isAdmin = user?.role === 'admin';
 
 	return (
 		<AppShell
@@ -124,6 +128,19 @@ export function FieldAppShell() {
 						className='field-nav-link'
 						mt={4}
 					/>
+					{isAdmin ? (
+						<NavLink
+							component={RouterNavLink}
+							to='/crew-map'
+							label='Crew map'
+							leftSection={<Map size={18} />}
+							active={location.pathname === '/crew-map'}
+							color='brand'
+							styles={navLinkStyles}
+							className='field-nav-link'
+							mt={4}
+						/>
+					) : null}
 				</AppShell.Section>
 
 				<AppShell.Section mt='md'>

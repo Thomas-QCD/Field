@@ -8,7 +8,7 @@ import {
   listAttachments,
 } from "./attachments.mjs";
 import { getPool } from "./db.mjs";
-import { createTask, updateTask, updateTaskStatus } from "./createTask.mjs";
+import { createCrewEvent, createTask, updateTask, updateTaskStatus } from "./createTask.mjs";
 
 const PORT = Number(process.env.API_PORT) || 3000;
 
@@ -469,6 +469,43 @@ async function listUsers(role) {
   }));
 }
 
+/** Latest GPS ping per active user from task_crew_events. */
+async function listCrewLocations() {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (e.user_id)
+       e.user_id,
+       u.display_name,
+       e.event_type,
+       e.latitude,
+       e.longitude,
+       e.accuracy_meters,
+       e.recorded_at,
+       e.task_id,
+       t.description
+     FROM task_crew_events e
+     JOIN users u ON u.id = e.user_id
+     JOIN tasks t ON t.id = e.task_id
+     WHERE e.latitude IS NOT NULL
+       AND e.longitude IS NOT NULL
+       AND u.is_active = true
+     ORDER BY e.user_id, e.recorded_at DESC`,
+  );
+
+  return rows.map((row) => ({
+    userId: String(row.user_id),
+    displayName: row.display_name,
+    eventType: row.event_type,
+    latitude: Number(row.latitude),
+    longitude: Number(row.longitude),
+    accuracyMeters:
+      row.accuracy_meters != null ? Number(row.accuracy_meters) : null,
+    recordedAt: new Date(row.recorded_at).toISOString(),
+    taskId: Number(row.task_id),
+    taskDesc: row.description ?? null,
+  }));
+}
+
 /**
  * @param {{ crewMemberId?: string | null }} [opts]
  */
@@ -600,7 +637,21 @@ async function getTask(id) {
            json_agg(
              json_build_object(
                'id', u.id::text,
-               'displayName', u.display_name
+               'displayName', u.display_name,
+               'startedAt', (
+                 SELECT e.recorded_at
+                 FROM task_crew_events e
+                 WHERE e.task_id = t.id
+                   AND e.user_id = u.id
+                   AND e.event_type = 'started'
+               ),
+               'endedAt', (
+                 SELECT e.recorded_at
+                 FROM task_crew_events e
+                 WHERE e.task_id = t.id
+                   AND e.user_id = u.id
+                   AND e.event_type = 'ended'
+               )
              )
              ORDER BY u.display_name
            ),
@@ -663,7 +714,16 @@ async function getTask(id) {
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     createdByName: row.created_by_name ?? "",
-    crewMembers: Array.isArray(row.crew_members) ? row.crew_members : [],
+    crewMembers: Array.isArray(row.crew_members)
+      ? row.crew_members.map((m) => ({
+          id: String(m.id),
+          displayName: m.displayName ?? "",
+          startedAt: m.startedAt
+            ? new Date(m.startedAt).toISOString()
+            : null,
+          endedAt: m.endedAt ? new Date(m.endedAt).toISOString() : null,
+        }))
+      : [],
   };
 }
 
@@ -755,6 +815,12 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/crew-locations") {
+      const locations = await listCrewLocations();
+      sendJson(res, { locations });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/health") {
       sendJson(res, { ok: true });
       return;
@@ -826,6 +892,16 @@ const server = createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const task = await updateTaskStatus(Number(taskStatusMatch[1]), body);
       sendJson(res, { task });
+      return;
+    }
+
+    const crewEventsMatch = url.pathname.match(
+      /^\/api\/tasks\/(\d+)\/crew-events$/,
+    );
+    if (req.method === "POST" && crewEventsMatch) {
+      const body = await readJsonBody(req);
+      const result = await createCrewEvent(Number(crewEventsMatch[1]), body);
+      sendJson(res, result, 201);
       return;
     }
 
