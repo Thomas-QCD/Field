@@ -360,6 +360,104 @@
 	overflow-wrap: anywhere;
 }
 
+.task-view-contacts {
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+	margin-top: 0.25rem;
+	width: 100%;
+}
+
+.task-view-contact {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	padding: 0.7rem 0.75rem;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+	background: var(--color-surface-raised);
+}
+
+.task-view-contact--poc {
+	border-color: var(--color-accent);
+}
+
+.task-view-contact-info {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	min-width: 0;
+	flex: 1;
+}
+
+.task-view-contact-name {
+	display: flex;
+	align-items: baseline;
+	gap: 0.4rem;
+	font-size: 0.9rem;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--color-text);
+}
+
+.task-view-contact-poc {
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--color-accent);
+}
+
+.task-view-contact-email {
+	font-size: 0.8rem;
+	line-height: 1.3;
+	color: var(--color-text-muted);
+	text-decoration: none;
+	overflow-wrap: anywhere;
+}
+
+.task-view-contact-email:active {
+	color: var(--color-text);
+}
+
+.task-view-contact-actions {
+	display: flex;
+	flex-shrink: 0;
+	gap: 0.4rem;
+}
+
+.task-view-contact-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	box-sizing: border-box;
+	min-height: 2.25rem;
+	padding: 0.35rem 0.65rem;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+	background: var(--color-bg);
+	color: var(--color-text);
+	font-family: inherit;
+	font-size: 0.75rem;
+	font-weight: 600;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.task-view-contact-btn:active:not(:disabled) {
+	background: var(--color-accent-subtle);
+}
+
+.task-view-contact-btn:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
 .task-view-description {
 	margin: 0.25rem 0 0;
 	padding-top: 0.85rem;

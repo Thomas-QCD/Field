@@ -94,6 +94,7 @@ function defaultDateTimeLocal(): string {
 
 export interface NewTaskFormValues {
 	contactIds: number[];
+	pocContactId: number | null;
 	taskType: TaskType;
 	externalKey: string;
 	taskDesc: string;
@@ -111,10 +112,21 @@ export interface NewTaskFormValues {
 	isTimeSpecific: string;
 }
 
+/** Keep POC on the task when possible; otherwise first contact. */
+function resolvePocContactId(
+	contactIds: number[],
+	currentPoc: number | null,
+): number | null {
+	if (contactIds.length === 0) return null;
+	if (currentPoc != null && contactIds.includes(currentPoc)) return currentPoc;
+	return contactIds[0];
+}
+
 function createEmptyForm(): NewTaskFormValues {
 	const now = defaultDateTimeLocal();
 	return {
 		contactIds: [],
+		pocContactId: null,
 		taskType: 'Delivery',
 		externalKey: '',
 		taskDesc: '',
@@ -231,11 +243,15 @@ export function NewTaskModal({
 			if (prev.some((o) => o.value === String(contact.id))) return prev;
 			return [...prev, { value: String(contact.id), label }];
 		});
-		setForm((prev) =>
-			prev.contactIds.includes(contact.id)
-				? prev
-				: { ...prev, contactIds: [...prev.contactIds, contact.id] },
-		);
+		setForm((prev) => {
+			if (prev.contactIds.includes(contact.id)) return prev;
+			const contactIds = [...prev.contactIds, contact.id];
+			return {
+				...prev,
+				contactIds,
+				pocContactId: resolvePocContactId(contactIds, prev.pocContactId),
+			};
+		});
 	};
 
 	const handleCreateAddress = async (values: NewAddressFormValues) => {
@@ -446,12 +462,19 @@ export function NewTaskModal({
 					size={inputSize}
 					data={contactOptions}
 					value={form.contactIds.map(String)}
-					onChange={(v) =>
-						update(
-							'contactIds',
-							v.map((id) => Number(id)).filter((n) => Number.isInteger(n)),
-						)
-					}
+					onChange={(v) => {
+						const contactIds = v
+							.map((id) => Number(id))
+							.filter((n) => Number.isInteger(n));
+						setForm((prev) => ({
+							...prev,
+							contactIds,
+							pocContactId: resolvePocContactId(
+								contactIds,
+								prev.pocContactId,
+							),
+						}));
+					}}
 					placeholder={form.contactIds.length === 0 ? 'No contacts' : undefined}
 					leftSection={<UserRound size={16} />}
 					rightSection={contactLoading ? <Loader size={14} /> : null}
@@ -478,6 +501,34 @@ export function NewTaskModal({
 					}
 					disabled={saving}
 				/>
+				{form.contactIds.length > 1 ? (
+					<Select
+						size={inputSize}
+						label='Point of contact'
+						description='Defaults to the first contact added'
+						data={form.contactIds.map((id) => {
+							const option = contactOptions.find(
+								(o) => o.value === String(id),
+							);
+							return {
+								value: String(id),
+								label: option?.label ?? `Contact #${id}`,
+							};
+						})}
+						value={
+							form.pocContactId != null ? String(form.pocContactId) : null
+						}
+						onChange={(v) =>
+							update(
+								'pocContactId',
+								v != null && v !== '' ? Number(v) : form.contactIds[0] ?? null,
+							)
+						}
+						leftSection={<UserRound size={16} />}
+						allowDeselect={false}
+						disabled={saving}
+					/>
+				) : null}
 
 				<Group justify='space-between' align='center' gap={6} wrap='nowrap'>
 					<Text fz={14} fw={600}>

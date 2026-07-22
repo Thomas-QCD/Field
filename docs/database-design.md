@@ -322,7 +322,7 @@ Central table. Contacts and crew are junction tables; destination is an optional
 
 **Crew assignment:** 0..many via `task_crew_members` (API/form: `crewMemberIds: string[]`).
 
-**Contact assignment:** 0..many via `task_contacts` (API/form: `contactIds: number[]`).
+**Contact assignment:** 0..many via `task_contacts` (API/form: `contactIds: number[]`). One POC per task (`is_poc` / `pocContactId`); defaults to the first contact in `contactIds`.
 
 **Destination:** 0..1 via `destinationAddressId` (pick existing venue by `address_name`), or create a new `addresses` row from `destinationAddressName` + street/building/notes.
 
@@ -343,15 +343,19 @@ Junction: which crew members are assigned to a task.
 
 ### `task_contacts`
 
-Junction: which contacts are on a task (mirrors `task_crew_members`).
+Junction: which contacts are on a task (mirrors `task_crew_members`). Exactly **one** contact may be the task **POC** (point of contact) when contacts exist — typically the first contact added.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `task_id` | `bigint` | PK, FK → `tasks.id` ON DELETE CASCADE |
 | `contact_id` | `bigint` | PK, FK → `contacts.id` |
+| `is_poc` | `boolean` | NOT NULL, default `false` |
 
 **Index:** `(contact_id)`
 
+**Unique partial index:** one `is_poc = true` row per `task_id`.
+
+**API:** `contactIds: number[]`; optional `pocContactId` (must be in `contactIds`). If omitted, the first `contactIds` entry is POC.
 ---
 
 ## Task Extensions
@@ -474,7 +478,8 @@ interface TaskReadModel {
   crewMemberIds: string[];
   assignedCrew: { id: string; displayName: string }[];
   contactIds: number[];
-  contacts: { id: number; name: string; phone: string; email: string }[];
+  pocContactId: number | null;
+  contacts: { id: number; name: string; phone: string; email: string; isPoc: boolean }[];
   destinationAddressId: number | null;
   destination: {
     streetLine: string;

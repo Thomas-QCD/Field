@@ -40,6 +40,7 @@ export interface TaskContact {
   name: string;
   phone: string;
   email: string;
+  isPoc: boolean;
 }
 
 export type AttachmentKind = 'photo' | 'signature' | 'document';

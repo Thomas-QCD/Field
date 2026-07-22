@@ -42,6 +42,7 @@ export async function getTask(
 export interface CreateTaskInput {
 	createdByUserId: string;
 	contactIds: number[];
+	pocContactId: number | null;
 	taskType: TaskType;
 	externalKey: string;
 	taskDesc: string;
@@ -65,6 +66,7 @@ export interface CreatedTask {
 	taskType: TaskType;
 	destinationAddressId: number | null;
 	contactIds: number[];
+	pocContactId: number | null;
 	crewMemberIds: string[];
 }
 
@@ -113,6 +115,30 @@ export async function updateTask(
 	}
 	if (!data.task) {
 		throw new Error('Update task failed: empty response');
+	}
+	return data.task;
+}
+
+export async function updateTaskStatus(
+	id: number,
+	status: TaskStatus,
+): Promise<{ id: number; status: TaskStatus }> {
+	const res = await apiFetch(`/api/tasks/${id}/status`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ status }),
+	});
+
+	const data = (await res.json().catch(() => ({}))) as {
+		task?: { id: number; status: TaskStatus };
+		error?: string;
+	};
+
+	if (!res.ok) {
+		throw new Error(data.error ?? `Update status failed (${res.status})`);
+	}
+	if (!data.task) {
+		throw new Error('Update status failed: empty response');
 	}
 	return data.task;
 }

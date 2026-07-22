@@ -8,7 +8,7 @@ import {
   listAttachments,
 } from "./attachments.mjs";
 import { getPool } from "./db.mjs";
-import { createTask, updateTask } from "./createTask.mjs";
+import { createTask, updateTask, updateTaskStatus } from "./createTask.mjs";
 
 const PORT = Number(process.env.API_PORT) || 3000;
 
@@ -26,7 +26,7 @@ function sendJson(res, body, status = 200) {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": buf.length,
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(buf);
@@ -38,7 +38,7 @@ function sendJson(res, body, status = 200) {
 function sendNoContent(res) {
   res.writeHead(204, {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end();
@@ -501,7 +501,7 @@ async function listTasks(opts = {}) {
        t.window_end_at,
        cu.display_name AS created_by_name,
        (
-         SELECT string_agg(c.name, ', ' ORDER BY c.name)
+         SELECT string_agg(c.name, ', ' ORDER BY tc.is_poc DESC, c.name)
          FROM task_contacts tc
          JOIN contacts c ON c.id = tc.contact_id
          WHERE tc.task_id = t.id
@@ -584,9 +584,10 @@ async function getTask(id) {
                'id', c.id,
                'name', c.name,
                'phone', COALESCE(c.phone, ''),
-               'email', COALESCE(c.email, '')
+               'email', COALESCE(c.email, ''),
+               'isPoc', tc.is_poc
              )
-             ORDER BY c.name
+             ORDER BY tc.is_poc DESC, c.name
            ),
            '[]'::json
          )
@@ -634,7 +635,15 @@ async function getTask(id) {
     destinationAddress: row.destination_address,
     destinationBuilding: row.destination_building,
     destinationNotes: row.destination_notes,
-    contacts: Array.isArray(row.contacts) ? row.contacts : [],
+    contacts: Array.isArray(row.contacts)
+      ? row.contacts.map((c) => ({
+          id: Number(c.id),
+          name: c.name ?? "",
+          phone: c.phone ?? "",
+          email: c.email ?? "",
+          isPoc: Boolean(c.isPoc),
+        }))
+      : [],
     crewSize: row.crew_size != null ? Number(row.crew_size) : null,
     estimatedHours:
       row.estimated_hours != null ? Number(row.estimated_hours) : null,
@@ -809,6 +818,14 @@ const server = createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const attachment = await confirmAttachment(taskId, body);
       sendJson(res, { attachment }, 201);
+      return;
+    }
+
+    const taskStatusMatch = url.pathname.match(/^\/api\/tasks\/(\d+)\/status$/);
+    if (req.method === "PATCH" && taskStatusMatch) {
+      const body = await readJsonBody(req);
+      const task = await updateTaskStatus(Number(taskStatusMatch[1]), body);
+      sendJson(res, { task });
       return;
     }
 

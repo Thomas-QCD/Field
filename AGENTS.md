@@ -206,6 +206,7 @@ Field workforce management covers work performed outside a central office. Model
 - `TaskDesc` holds rich crew instructions (directions, access codes, photo requirements).
 - Tasks use **destination only** — Field does not model dispatch/pickup (single fixed origin).
 - Contacts and destination are assigned separately (0..many contacts, 0..1 address).
+- Each task has at most one **POC** (point of contact) among its contacts — typically the first contact added (`task_contacts.is_poc`).
 - Crew members are assigned by user ID; display names come from `users` (join), not stored on the task.
 - Photo proof may be instruction-driven (described in `TaskDesc`) — attachment model TBD.
 

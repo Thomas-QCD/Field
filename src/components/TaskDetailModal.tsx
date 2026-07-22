@@ -262,9 +262,16 @@ export function TaskDetailModal({
 							<Stack gap='sm'>
 								{task.contacts.map((contact) => (
 									<Box key={contact.id}>
-										<Text size='sm' fw={600}>
-											{formatShortName(contact.name)}
-										</Text>
+										<Group gap={8} wrap='nowrap'>
+											<Text size='sm' fw={600}>
+												{formatShortName(contact.name)}
+											</Text>
+											{contact.isPoc ? (
+												<Text size='xs' fw={700} c='dimmed'>
+													POC
+												</Text>
+											) : null}
+										</Group>
 										{(contact.phone || contact.email) && (
 											<Group gap='md' mt={2}>
 												{contact.phone ? (

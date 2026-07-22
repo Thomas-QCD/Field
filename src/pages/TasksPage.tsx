@@ -52,8 +52,11 @@ function startTimeMs(iso: string | null): number {
 }
 
 function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
+	const contactIds = task.contacts.map((c) => c.id);
+	const poc = task.contacts.find((c) => c.isPoc);
 	return {
-		contactIds: task.contacts.map((c) => c.id),
+		contactIds,
+		pocContactId: poc?.id ?? contactIds[0] ?? null,
 		taskType: task.taskType,
 		externalKey: task.externalKey,
 		taskDesc: task.description,

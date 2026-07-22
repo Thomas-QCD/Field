@@ -93,6 +93,35 @@ function asIdList(value) {
 }
 
 /**
+ * Resolve the task POC: explicit pocContactId if on the task, else first contact.
+ * @param {number[]} contactIds
+ * @param {unknown} rawPocContactId
+ * @returns {number | null}
+ */
+function resolvePocContactId(contactIds, rawPocContactId) {
+  if (contactIds.length === 0) return null;
+
+  if (rawPocContactId != null && rawPocContactId !== "") {
+    const n = Number(rawPocContactId);
+    if (!Number.isInteger(n) || n < 1) {
+      throw Object.assign(
+        new Error("pocContactId must be a positive integer"),
+        { status: 400 },
+      );
+    }
+    if (!contactIds.includes(n)) {
+      throw Object.assign(
+        new Error("pocContactId must be one of contactIds"),
+        { status: 400 },
+      );
+    }
+    return n;
+  }
+
+  return contactIds[0];
+}
+
+/**
  * Create a task with 0..many contacts (task_contacts) and optional 0..1 address.
  *
  * @param {Record<string, unknown>} body
@@ -140,6 +169,7 @@ export async function createTask(body) {
   }
 
   const contactIds = asIdList(body.contactIds);
+  const pocContactId = resolvePocContactId(contactIds, body.pocContactId);
 
   const windowStartAt = asOptionalDateTime(body.afterDateTime);
   const windowEndAt = asOptionalDateTime(body.beforeDateTime);
@@ -293,8 +323,9 @@ export async function createTask(body) {
 
     for (const contactId of contactIds) {
       await client.query(
-        `INSERT INTO task_contacts (task_id, contact_id) VALUES ($1, $2)`,
-        [taskId, contactId],
+        `INSERT INTO task_contacts (task_id, contact_id, is_poc)
+         VALUES ($1, $2, $3)`,
+        [taskId, contactId, contactId === pocContactId],
       );
     }
 
@@ -316,6 +347,7 @@ export async function createTask(body) {
           ? Number(taskRows[0].destination_address_id)
           : null,
       contactIds,
+      pocContactId,
       crewMemberIds,
     };
   } catch (err) {
@@ -376,6 +408,7 @@ export async function updateTask(taskId, body) {
   }
 
   const contactIds = asIdList(body.contactIds);
+  const pocContactId = resolvePocContactId(contactIds, body.pocContactId);
 
   const windowStartAt = asOptionalDateTime(body.afterDateTime);
   const windowEndAt = asOptionalDateTime(body.beforeDateTime);
@@ -518,8 +551,9 @@ export async function updateTask(taskId, body) {
     await client.query(`DELETE FROM task_contacts WHERE task_id = $1`, [taskId]);
     for (const contactId of contactIds) {
       await client.query(
-        `INSERT INTO task_contacts (task_id, contact_id) VALUES ($1, $2)`,
-        [taskId, contactId],
+        `INSERT INTO task_contacts (task_id, contact_id, is_poc)
+         VALUES ($1, $2, $3)`,
+        [taskId, contactId, contactId === pocContactId],
       );
     }
 
@@ -544,7 +578,101 @@ export async function updateTask(taskId, body) {
           ? Number(taskRows[0].destination_address_id)
           : null,
       contactIds,
+      pocContactId,
       crewMemberIds,
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // ignore rollback errors
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** @type {Record<string, string[]>} */
+const STATUS_TRANSITIONS = {
+  Created: ["Unassigned", "Assigned"],
+  Unassigned: ["Assigned"],
+  Assigned: ["Loaded", "Arrived", "Failed"],
+  Loaded: ["Arrived", "Failed"],
+  Arrived: ["Completed", "Failed"],
+  Completed: [],
+  Failed: [],
+  Cancelled: [],
+};
+
+/**
+ * Update task status with draft transition rules.
+ * Start Task → Arrived; End Task → Completed (completed_at set).
+ *
+ * @param {number} taskId
+ * @param {Record<string, unknown>} body
+ */
+export async function updateTaskStatus(taskId, body) {
+  if (!Number.isInteger(taskId) || taskId < 1) {
+    throw Object.assign(new Error("Invalid task id"), { status: 400 });
+  }
+
+  const status = asString(body.status);
+  if (!status || !(status in STATUS_TRANSITIONS)) {
+    throw Object.assign(new Error(`Invalid status: ${status || "(empty)"}`), {
+      status: 400,
+    });
+  }
+
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query(
+      `SELECT id, status
+       FROM tasks
+       WHERE id = $1 AND deleted_at IS NULL
+       FOR UPDATE`,
+      [taskId],
+    );
+    if (existing.rowCount === 0) {
+      throw Object.assign(new Error("Task not found"), { status: 404 });
+    }
+
+    const fromStatus = existing.rows[0].status;
+    if (fromStatus === status) {
+      await client.query("COMMIT");
+      return { id: taskId, status: fromStatus };
+    }
+
+    const allowed = STATUS_TRANSITIONS[fromStatus] ?? [];
+    if (!allowed.includes(status)) {
+      throw Object.assign(
+        new Error(`Cannot change status from ${fromStatus} to ${status}`),
+        { status: 409 },
+      );
+    }
+
+    const { rows } = await client.query(
+      `UPDATE tasks
+       SET status = $2::task_status,
+           completed_at = CASE
+             WHEN $2::task_status = 'Completed' THEN COALESCE(completed_at, NOW())
+             ELSE completed_at
+           END,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, status`,
+      [taskId, status],
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      id: Number(rows[0].id),
+      status: rows[0].status,
     };
   } catch (err) {
     try {

@@ -3,18 +3,20 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Box, Group, Loader, Text, UnstyledButton } from '@mantine/core';
 import {
 	Camera,
+	CheckCircle,
 	ChevronLeft,
 	MessageSquare,
 	Navigation,
 	Phone,
+	Play,
 } from 'lucide-react';
-import { getTask } from '../api/tasks';
+import { getTask, updateTaskStatus } from '../api/tasks';
 import { TaskAttachments } from '../components/TaskAttachments';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
 import { openMapsNavigation } from '../openMapsNavigation';
-import type { TaskDetail } from '../types/task';
+import type { TaskContact, TaskDetail, TaskStatus } from '../types/task';
 
 function formatWindow(start: string | null, end: string | null): string {
 	return `${formatShortDateTimeWithAgo(start)} – ${formatShortDateTimeWithAgo(end)}`;
@@ -25,6 +27,62 @@ function Field({ label, value }: { label: string; value: string }) {
 		<div className='task-view-field'>
 			<span className='task-view-field-label'>{label}</span>
 			<span className='task-view-field-value'>{value || '—'}</span>
+		</div>
+	);
+}
+
+function ContactBlock({ contact }: { contact: TaskContact }) {
+	const phone = contact.phone.trim();
+	const canCall = Boolean(phone);
+
+	return (
+		<div
+			className={
+				contact.isPoc
+					? 'task-view-contact task-view-contact--poc'
+					: 'task-view-contact'
+			}
+		>
+			<div className='task-view-contact-info'>
+				<div className='task-view-contact-name'>
+					<span>{formatShortName(contact.name)}</span>
+					{contact.isPoc ? (
+						<span className='task-view-contact-poc'>POC</span>
+					) : null}
+				</div>
+				{contact.email ? (
+					<a
+						className='task-view-contact-email'
+						href={`mailto:${contact.email}`}
+					>
+						{contact.email}
+					</a>
+				) : null}
+			</div>
+			<div className='task-view-contact-actions'>
+				<button
+					type='button'
+					className='task-view-contact-btn'
+					disabled={!canCall}
+					onClick={() => {
+						window.location.href = `sms:${phone}`;
+					}}
+				>
+					<MessageSquare size={16} strokeWidth={2} aria-hidden />
+					Text
+				</button>
+				<button
+					type='button'
+					className='task-view-contact-btn'
+					disabled={!canCall}
+					onClick={() => {
+						window.location.href = `tel:${phone}`;
+					}}
+				>
+					<Phone size={16} strokeWidth={2} aria-hidden />
+					Call
+				</button>
+			</div>
 		</div>
 	);
 }
@@ -53,14 +111,45 @@ function ActionButton({
 	);
 }
 
-function TaskViewBody({ task }: { task: TaskDetail }) {
+function canStartTask(status: TaskStatus): boolean {
+	return status === 'Assigned' || status === 'Loaded';
+}
+
+function canEndTask(status: TaskStatus): boolean {
+	return status === 'Arrived';
+}
+
+function TaskViewBody({
+	task,
+	onStatusChange,
+}: {
+	task: TaskDetail;
+	onStatusChange: (status: TaskStatus) => Promise<void>;
+}) {
 	const cameraInputRef = useRef<HTMLInputElement>(null);
+	const [statusBusy, setStatusBusy] = useState(false);
+	const [statusError, setStatusError] = useState<string | null>(null);
 	const address = task.destinationAddress.trim();
 	const destinationName = task.destinationAddressName.trim();
 	const canNavigate = Boolean(address);
 
 	const openCamera = () => {
 		cameraInputRef.current?.click();
+	};
+
+	const changeStatus = async (status: TaskStatus) => {
+		if (statusBusy) return;
+		setStatusBusy(true);
+		setStatusError(null);
+		try {
+			await onStatusChange(status);
+		} catch (err: unknown) {
+			setStatusError(
+				err instanceof Error ? err.message : 'Failed to update status',
+			);
+		} finally {
+			setStatusBusy(false);
+		}
 	};
 
 	return (
@@ -78,13 +167,34 @@ function TaskViewBody({ task }: { task: TaskDetail }) {
 				<ActionButton
 					label='Navigate'
 					icon={Navigation}
-					disabled={!canNavigate}
+					disabled={!canNavigate || statusBusy}
 					onClick={() => openMapsNavigation(address)}
 				/>
-				<ActionButton label='Call' icon={Phone} />
-				<ActionButton label='Text' icon={MessageSquare} />
-				<ActionButton label='Photo' icon={Camera} onClick={openCamera} />
+				<ActionButton
+					label='Start task'
+					icon={Play}
+					disabled={!canStartTask(task.status) || statusBusy}
+					onClick={() => void changeStatus('Arrived')}
+				/>
+				<ActionButton
+					label='End task'
+					icon={CheckCircle}
+					disabled={!canEndTask(task.status) || statusBusy}
+					onClick={() => void changeStatus('Completed')}
+				/>
+				<ActionButton
+					label='Photo'
+					icon={Camera}
+					disabled={statusBusy}
+					onClick={openCamera}
+				/>
 			</div>
+
+			{statusError ? (
+				<Alert color='red' title='Status update failed'>
+					{statusError}
+				</Alert>
+			) : null}
 
 			<p className='task-view-address'>{address || 'No address'}</p>
 			{destinationName ? (
@@ -106,6 +216,19 @@ function TaskViewBody({ task }: { task: TaskDetail }) {
 					label='Created by'
 					value={task.createdByName ? formatShortName(task.createdByName) : ''}
 				/>
+			</div>
+
+			<div className='task-view-field'>
+				<span className='task-view-field-label'>Contacts</span>
+				{task.contacts.length === 0 ? (
+					<span className='task-view-field-value'>None</span>
+				) : (
+					<div className='task-view-contacts'>
+						{task.contacts.map((contact) => (
+							<ContactBlock key={contact.id} contact={contact} />
+						))}
+					</div>
+				)}
 			</div>
 
 			<Field
@@ -203,6 +326,23 @@ export function TaskViewPage() {
 		return () => controller.abort();
 	}, [taskId]);
 
+	const handleStatusChange = async (status: TaskStatus) => {
+		if (!task) return;
+		const updated = await updateTaskStatus(task.id, status);
+		setTask((prev) =>
+			prev
+				? {
+						...prev,
+						status: updated.status,
+						completedAt:
+							updated.status === 'Completed'
+								? (prev.completedAt ?? new Date().toISOString())
+								: prev.completedAt,
+					}
+				: prev,
+		);
+	};
+
 	return (
 		<Box className='task-view-page'>
 			<header className='task-view-header'>
@@ -238,7 +378,7 @@ export function TaskViewPage() {
 					{error}
 				</Alert>
 			) : task ? (
-				<TaskViewBody task={task} />
+				<TaskViewBody task={task} onStatusChange={handleStatusChange} />
 			) : null}
 		</Box>
 	);
