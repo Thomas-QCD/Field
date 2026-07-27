@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Button, Group, Loader, Title, Box } from '@mantine/core';
+import {
+	Alert,
+	Button,
+	Checkbox,
+	Group,
+	Loader,
+	Menu,
+	Title,
+	Box,
+} from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { Plus } from 'lucide-react';
-import type {
-	ColDef,
-	RowClickedEvent,
-	ValueFormatterParams,
-} from 'ag-grid-community';
+import { Columns3, Plus } from 'lucide-react';
+import type { GridApi, RowClickedEvent } from 'ag-grid-community';
 import { AllCommunityModule } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
 import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
 import { uploadAttachment } from '../api/attachments';
 import { useCurrentUser } from '../context/CurrentUserContext';
+import { formatShortName } from '../formatName';
 import type { Task, TaskDetail } from '../types/task';
 import {
 	NewTaskModal,
@@ -20,7 +26,16 @@ import {
 } from '../components/NewTaskModal';
 import { TaskDetailModal } from '../components/TaskDetailModal';
 import { TaskCards } from '../components/TaskCards';
-import { formatTimeAgo } from '../formatTime';
+import {
+	AG_GRID_MOBILE_MQ,
+	DEFAULT_VISIBLE_TASK_COLUMNS,
+	getDefaultColDef,
+	getTaskColumnDefs,
+	readVisibleTaskColumns,
+	TASK_COLUMN_OPTIONS,
+	type TaskColumnField,
+	writeVisibleTaskColumns,
+} from '../agGridDefaults';
 
 function toDateTimeLocal(iso: string | null): string {
 	if (!iso) {
@@ -78,82 +93,109 @@ function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
 	};
 }
 
-const columnDefs: ColDef<Task>[] = [
-	{
-		field: 'externalKey',
-		headerName: 'Job',
-		valueFormatter: (p: ValueFormatterParams<Task, string>) => {
-			const value = p.value ?? '';
-			// Look for the first sequence of 5 or 6 consecutive digits
-			const m = value.match(/\d{5,6}/);
-			if (m) return m[0];
-			return value;
-		},
-		width: 60,
-		minWidth: 60,
-		maxWidth: 60,
-		suppressSizeToFit: true,
-	},
-	{
-		field: 'taskType',
-		headerName: 'Type',
-		minWidth: 72,
-		flex: 0.5,
-		valueFormatter: (p: ValueFormatterParams<Task, string>) => {
-			const value = p.value ?? '';
-			if (value === 'Site Survey') return 'SS';
-			return value;
-		},
-	},
-	{
-		field: 'destinationAddress',
-		headerName: 'Destination',
-		minWidth: 120,
-		flex: 1.2,
-	},
-	{
-		field: 'windowStartAt',
-		headerName: 'Start',
-		valueFormatter: (p: ValueFormatterParams<Task, string | null>) =>
-			formatTimeAgo(p.value ?? null) ?? '',
-		minWidth: 120,
-		flex: 1.2,
-	},
-];
+const MONTH_SHORT = [
+	'Jan',
+	'Feb',
+	'Mar',
+	'Apr',
+	'May',
+	'Jun',
+	'Jul',
+	'Aug',
+	'Sep',
+	'Oct',
+	'Nov',
+	'Dec',
+] as const;
 
-/** Survives TasksPage remount when navigating to/from task view. */
-let showTodayOnlyMemory = false;
+/** Local calendar day key YYYY-MM-DD for stable compare/select. */
+function localDayKey(d: Date): string {
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function dayKeyFromIso(iso: string | null): string | null {
+	if (!iso) return null;
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return null;
+	return localDayKey(d);
+}
+
+function parseDayKey(key: string): Date {
+	const [y, m, d] = key.split('-').map(Number);
+	return new Date(y, m - 1, d);
+}
 
 export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 	const { user } = useCurrentUser();
 	const navigate = useNavigate();
-	const isMobile = useMediaQuery('(max-width: 47.9975em)');
+	const isMobile = useMediaQuery(AG_GRID_MOBILE_MQ);
 	const [newTaskOpen, setNewTaskOpen] = useState(false);
 	const [editingTask, setEditingTask] = useState<TaskDetail | null>(null);
 	const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
 	const [tasks, setTasks] = useState<Task[]>([]);
 	const [hideDelivery, setHideDelivery] = useState(false);
-	const [showTodayOnly, setShowTodayOnly] = useState(showTodayOnlyMemory);
+	const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-
-	const defaultColDef = useMemo<ColDef<Task>>(
-		() => ({
-			sortable: true,
-			filter: !isMobile,
-			resizable: true,
-		}),
-		[isMobile],
+	const [visibleColumns, setVisibleColumns] = useState<TaskColumnField[]>(
+		readVisibleTaskColumns,
 	);
+	const gridApiRef = useRef<GridApi<Task> | null>(null);
+
+	const defaultColDef = useMemo(() => getDefaultColDef(isMobile), [isMobile]);
+
+	const columnDefs = useMemo(
+		() =>
+			getTaskColumnDefs(
+				isMobile ? DEFAULT_VISIBLE_TASK_COLUMNS : visibleColumns,
+			),
+		[isMobile, visibleColumns],
+	);
+
+	const toggleColumn = (field: TaskColumnField, checked: boolean) => {
+		const option = TASK_COLUMN_OPTIONS.find((o) => o.field === field);
+		if (option?.required) return;
+		setVisibleColumns((prev) => {
+			const next = writeVisibleTaskColumns(
+				checked ? [...prev, field] : prev.filter((f) => f !== field),
+			);
+			queueMicrotask(() => gridApiRef.current?.sizeColumnsToFit());
+			return next;
+		});
+	};
+
+	const taskDayKeys = useMemo(() => {
+		if (mode !== 'mine') return [] as string[];
+		const keys = new Set<string>();
+		for (const task of tasks) {
+			const key = dayKeyFromIso(task.windowStartAt);
+			if (key) keys.add(key);
+		}
+		return [...keys].sort();
+	}, [tasks, mode]);
+
+	useEffect(() => {
+		if (mode !== 'mine' || taskDayKeys.length === 0) {
+			setSelectedDayKey(null);
+			return;
+		}
+		setSelectedDayKey((prev) => {
+			if (prev && taskDayKeys.includes(prev)) return prev;
+			const todayKey = localDayKey(new Date());
+			if (taskDayKeys.includes(todayKey)) return todayKey;
+			return taskDayKeys[0] ?? null;
+		});
+	}, [mode, taskDayKeys]);
 
 	const visibleTasks = useMemo(() => {
 		let next = tasks;
 		if (mode === 'all' && hideDelivery) {
 			next = next.filter((task) => task.taskType !== 'Delivery');
 		}
-		if (mode === 'mine' && showTodayOnly) {
-			const today = new Date();
-			next = next.filter((task) => isSameLocalDay(task.windowStartAt, today));
+		if (mode === 'mine' && isMobile && selectedDayKey) {
+			const day = parseDayKey(selectedDayKey);
+			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
 		}
 		if (mode === 'mine') {
 			next = [...next].sort(
@@ -161,9 +203,9 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 			);
 		}
 		return next;
-	}, [tasks, mode, hideDelivery, showTodayOnly]);
+	}, [tasks, mode, hideDelivery, isMobile, selectedDayKey]);
 
-	const useCardView = mode === 'mine' && showTodayOnly && Boolean(isMobile);
+	const useCardView = mode === 'mine' && Boolean(isMobile);
 
 	const crewMemberId = mode === 'mine' ? (user?.id ?? null) : null;
 
@@ -265,8 +307,18 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 		[editingTask],
 	);
 
-	const pageTitle =
-		mode === 'mine' ? (showTodayOnly ? "Today's Tasks" : 'My Tasks') : 'Tasks';
+	const editorInitialContactOptions = useMemo(() => {
+		if (!editingTask) return null;
+		return editingTask.contacts.map((c) => {
+			const shortName = formatShortName(c.name);
+			return {
+				value: String(c.id),
+				label: c.email ? `${shortName} (${c.email})` : shortName,
+			};
+		});
+	}, [editingTask]);
+
+	const pageTitle = mode === 'mine' ? 'My Tasks' : 'Tasks';
 
 	return (
 		<Box className='tasks-page'>
@@ -275,18 +327,8 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 					{pageTitle}
 				</Title>
 				{mode === 'mine' ? (
-					<Button
-						variant={showTodayOnly ? 'light' : 'default'}
-						color='brand'
-						onClick={() =>
-							setShowTodayOnly((v) => {
-								const next = !v;
-								showTodayOnlyMemory = next;
-								return next;
-							})
-						}
-					>
-						{showTodayOnly ? 'Show All' : 'Show Today Only'}
+					<Button variant='default' color='brand'>
+						Show Today Only
 					</Button>
 				) : (
 					<Button
@@ -297,6 +339,33 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 						{hideDelivery ? 'Show Delivery' : 'Hide Delivery'}
 					</Button>
 				)}
+				{!isMobile ? (
+					<Menu shadow='md' width={220} closeOnItemClick={false}>
+						<Menu.Target>
+							<Button
+								variant='default'
+								color='brand'
+								leftSection={<Columns3 size={18} />}
+							>
+								Columns
+							</Button>
+						</Menu.Target>
+						<Menu.Dropdown>
+							{TASK_COLUMN_OPTIONS.map((option) => (
+								<Menu.Item key={option.field} component='div'>
+									<Checkbox
+										label={option.headerName}
+										checked={visibleColumns.includes(option.field)}
+										disabled={option.required}
+										onChange={(e) =>
+											toggleColumn(option.field, e.currentTarget.checked)
+										}
+									/>
+								</Menu.Item>
+							))}
+						</Menu.Dropdown>
+					</Menu>
+				) : null}
 				{mode === 'all' ? (
 					<Button
 						leftSection={<Plus size={18} />}
@@ -310,6 +379,35 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 					</Button>
 				) : null}
 			</Group>
+
+			{useCardView && taskDayKeys.length > 0 ? (
+				<div
+					className='tasks-day-chips'
+					role='tablist'
+					aria-label='Filter tasks by day'
+				>
+					{taskDayKeys.map((key) => {
+						const day = parseDayKey(key);
+						const selected = key === selectedDayKey;
+						return (
+							<button
+								key={key}
+								type='button'
+								role='tab'
+								aria-selected={selected}
+								className='tasks-day-chip'
+								data-selected={selected || undefined}
+								onClick={() => setSelectedDayKey(key)}
+							>
+								<span className='tasks-day-chip-month'>
+									{MONTH_SHORT[day.getMonth()]}
+								</span>
+								<span className='tasks-day-chip-date'>{day.getDate()}</span>
+							</button>
+						);
+					})}
+				</div>
+			) : null}
 
 			{mode === 'mine' && !user ? (
 				<Alert color='yellow' title='Select a user' mb='md'>
@@ -345,6 +443,9 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 							suppressHorizontalScroll
 							rowStyle={{ cursor: 'pointer' }}
 							onRowClicked={handleRowClicked}
+							onGridReady={(e) => {
+								gridApiRef.current = e.api;
+							}}
 							onGridSizeChanged={(e) => e.api.sizeColumnsToFit()}
 							onFirstDataRendered={(e) => e.api.sizeColumnsToFit()}
 						/>
@@ -356,6 +457,7 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 				opened={newTaskOpen || editingTask != null}
 				onClose={handleCloseEditor}
 				initialValues={editorInitialValues}
+				initialContactOptions={editorInitialContactOptions}
 				taskId={editingTask?.id ?? null}
 				onSave={handleSaveTask}
 			/>
@@ -366,6 +468,13 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 				onClose={() => setDetailTaskId(null)}
 				onEdit={handleEditTask}
 				onDelete={handleDeleteTask}
+				onStatusChange={(updated) => {
+					setTasks((prev) =>
+						prev.map((t) =>
+							t.id === updated.id ? { ...t, status: updated.status } : t,
+						),
+					);
+				}}
 			/>
 		</Box>
 	);

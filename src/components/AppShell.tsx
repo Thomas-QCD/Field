@@ -11,8 +11,10 @@ import {
 	Map,
 	MapPinned,
 	Menu,
+	Users,
 } from 'lucide-react';
 import { useCurrentUser } from '../context/CurrentUserContext';
+import { EntraSignedIn, showEntraSignedIn } from '../auth/EntraSignedIn';
 import { UserSelect } from './UserSelect';
 
 const navLinkStyles = {
@@ -25,7 +27,7 @@ const navLinkStyles = {
 
 const bottomNavItems = [
 	{ to: '/my-tasks', end: false, label: 'My Tasks', icon: ClipboardCheck },
-	{ to: '/tasks', end: false, label: 'Tasks', icon: ClipboardList },
+	{ to: '/tasks', end: false, label: 'All Tasks', icon: ClipboardList },
 	{ to: '/contacts', end: false, label: 'Contacts', icon: Contact },
 	{ to: '/addresses', end: false, label: 'Addresses', icon: MapPinned },
 	{ to: '/more', end: false, label: 'More', icon: Menu },
@@ -37,10 +39,15 @@ function isNavActive(pathname: string, to: string, end: boolean) {
 		: pathname === to || pathname.startsWith(`${to}/`);
 }
 
+function canManageUsers(role: string | undefined): boolean {
+	return role === 'admin' || role === 'creator';
+}
+
 export function FieldAppShell() {
 	const location = useLocation();
 	const { user } = useCurrentUser();
 	const isAdmin = user?.role === 'admin';
+	const showUsersNav = canManageUsers(user?.role);
 
 	return (
 		<AppShell
@@ -98,7 +105,7 @@ export function FieldAppShell() {
 					<NavLink
 						component={RouterNavLink}
 						to='/tasks'
-						label='Tasks'
+						label='All Tasks'
 						leftSection={<ClipboardList size={18} />}
 						active={location.pathname === '/tasks'}
 						color='brand'
@@ -128,6 +135,19 @@ export function FieldAppShell() {
 						className='field-nav-link'
 						mt={4}
 					/>
+					{showUsersNav ? (
+						<NavLink
+							component={RouterNavLink}
+							to='/users'
+							label='Users'
+							leftSection={<Users size={18} />}
+							active={location.pathname === '/users'}
+							color='brand'
+							styles={navLinkStyles}
+							className='field-nav-link'
+							mt={4}
+						/>
+					) : null}
 					{isAdmin ? (
 						<NavLink
 							component={RouterNavLink}
@@ -154,7 +174,7 @@ export function FieldAppShell() {
 					>
 						Signed in as
 					</Text>
-					<UserSelect />
+					{showEntraSignedIn() ? <EntraSignedIn /> : <UserSelect />}
 				</AppShell.Section>
 			</AppShell.Navbar>
 

@@ -1,4 +1,10 @@
-import type { Task, TaskDetail, TaskStatus, TaskType } from '../types/task';
+import type {
+	Task,
+	TaskCompletionNote,
+	TaskDetail,
+	TaskStatus,
+	TaskType,
+} from '../types/task';
 import { apiFetch } from './client';
 
 export async function listTasks(
@@ -120,15 +126,36 @@ export async function updateTask(
 export async function updateTaskStatus(
 	id: number,
 	status: TaskStatus,
-): Promise<{ id: number; status: TaskStatus }> {
+	opts?: { notes?: string; userId?: string },
+): Promise<{
+	id: number;
+	status: TaskStatus;
+	completedAt: string | null;
+	completedNotes: string | null;
+	failedReason: string | null;
+	completionNotes: TaskCompletionNote[];
+	completionNotesByName: string | null;
+}> {
 	const res = await apiFetch(`/api/tasks/${id}/status`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ status }),
+		body: JSON.stringify({
+			status,
+			...(opts && 'notes' in opts ? { notes: opts.notes ?? '' } : {}),
+			...(opts?.userId ? { userId: opts.userId } : {}),
+		}),
 	});
 
 	const data = (await res.json().catch(() => ({}))) as {
-		task?: { id: number; status: TaskStatus };
+		task?: {
+			id: number;
+			status: TaskStatus;
+			completedAt?: string | null;
+			completedNotes?: string | null;
+			failedReason?: string | null;
+			completionNotes?: TaskCompletionNote[];
+			completionNotesByName?: string | null;
+		};
 		error?: string;
 	};
 
@@ -138,14 +165,25 @@ export async function updateTaskStatus(
 	if (!data.task) {
 		throw new Error('Update status failed: empty response');
 	}
-	return data.task;
+	return {
+		id: data.task.id,
+		status: data.task.status,
+		completedAt: data.task.completedAt ?? null,
+		completedNotes: data.task.completedNotes ?? null,
+		failedReason: data.task.failedReason ?? null,
+		completionNotes: data.task.completionNotes ?? [],
+		completionNotesByName: data.task.completionNotesByName ?? null,
+	};
 }
 
 export type CrewEventType = 'started' | 'ended';
+export type CrewEventOutcome = 'Completed' | 'Failed';
 
 export interface CreateCrewEventInput {
 	userId: string;
 	eventType: CrewEventType;
+	outcome?: CrewEventOutcome;
+	notes?: string;
 	latitude?: number | null;
 	longitude?: number | null;
 	accuracyMeters?: number | null;
@@ -169,7 +207,14 @@ export async function createCrewEvent(
 	input: CreateCrewEventInput,
 ): Promise<{
 	event: CrewEvent;
-	task: { id: number; status: TaskStatus; completedAt: string | null };
+	task: {
+		id: number;
+		status: TaskStatus;
+		completedAt: string | null;
+		completedNotes: string | null;
+		failedReason: string | null;
+		completionNotes: TaskCompletionNote[];
+	};
 }> {
 	const res = await apiFetch(`/api/tasks/${taskId}/crew-events`, {
 		method: 'POST',
@@ -179,7 +224,14 @@ export async function createCrewEvent(
 
 	const data = (await res.json().catch(() => ({}))) as {
 		event?: CrewEvent;
-		task?: { id: number; status: TaskStatus; completedAt: string | null };
+		task?: {
+			id: number;
+			status: TaskStatus;
+			completedAt: string | null;
+			completedNotes?: string | null;
+			failedReason?: string | null;
+			completionNotes?: TaskCompletionNote[];
+		};
 		error?: string;
 	};
 
@@ -189,7 +241,17 @@ export async function createCrewEvent(
 	if (!data.event || !data.task) {
 		throw new Error('Crew event failed: empty response');
 	}
-	return { event: data.event, task: data.task };
+	return {
+		event: data.event,
+		task: {
+			id: data.task.id,
+			status: data.task.status,
+			completedAt: data.task.completedAt,
+			completedNotes: data.task.completedNotes ?? null,
+			failedReason: data.task.failedReason ?? null,
+			completionNotes: data.task.completionNotes ?? [],
+		},
+	};
 }
 
 export async function deleteTask(id: number): Promise<void> {
@@ -199,3 +261,32 @@ export async function deleteTask(id: number): Promise<void> {
 		throw new Error(data.error ?? `Delete task failed (${res.status})`);
 	}
 }
+
+/** Fetch delivery docket PDF and open it in a new tab for viewing/printing (no download). */
+export async function openDeliveryDocket(taskId: number): Promise<void> {
+	// Open on the user gesture so the tab is not blocked; navigate once the PDF is ready.
+	const printWindow = window.open('about:blank', '_blank');
+	try {
+		const res = await apiFetch(`/api/tasks/${taskId}/delivery-docket`);
+		if (!res.ok) {
+			const data = (await res.json().catch(() => ({}))) as { error?: string };
+			throw new Error(data.error ?? `Delivery docket failed (${res.status})`);
+		}
+		const buf = await res.arrayBuffer();
+		const blob = new Blob([buf], { type: 'application/pdf' });
+		const url = URL.createObjectURL(blob);
+		if (printWindow) {
+			printWindow.location.replace(url);
+		} else {
+			// Popup blocked — still view inline in this tab's history via temporary navigation is avoided;
+			// open without features string so the browser shows the PDF viewer when possible.
+			window.open(url, '_blank');
+		}
+		window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+	} catch (err) {
+		printWindow?.close();
+		throw err;
+	}
+}
+
+

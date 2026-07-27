@@ -9,14 +9,15 @@ import {
 	Text,
 	UnstyledButton,
 } from '@mantine/core';
-import { Download, Paperclip, Trash2 } from 'lucide-react';
+import { Download, Film, Paperclip, Trash2 } from 'lucide-react';
 import {
-	ATTACHMENT_ACCEPT,
+	attachmentAcceptAttr,
 	deleteAttachment,
 	getAttachmentDownloadUrl,
+	isVideoMime,
 	listAttachments,
-	MAX_ATTACHMENT_BYTES,
 	uploadAttachment,
+	validateAttachmentFile,
 } from '../api/attachments';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
@@ -35,6 +36,7 @@ function formatBytes(bytes: number | null): string {
 function isViewableMime(mimeType: string): boolean {
 	return (
 		mimeType.startsWith('image/') ||
+		isVideoMime(mimeType) ||
 		mimeType === 'application/pdf' ||
 		mimeType === 'text/plain'
 	);
@@ -160,8 +162,10 @@ export function TaskAttachments({
 			setError('Select a current user before uploading');
 			return;
 		}
-		if (file.size > MAX_ATTACHMENT_BYTES) {
-			setError('File exceeds 25 MB limit');
+		const validationError = validateAttachmentFile(file);
+		if (validationError) {
+			setError(validationError);
+			if (inputRef.current) inputRef.current.value = '';
 			return;
 		}
 
@@ -291,7 +295,7 @@ export function TaskAttachments({
 				ref={inputRef}
 				id={inputId}
 				type='file'
-				accept={ATTACHMENT_ACCEPT}
+				accept={attachmentAcceptAttr()}
 				className='task-attachments-input'
 				disabled={uploading || !user}
 				onChange={(e) => void handleUpload(e.target.files)}
@@ -323,127 +327,145 @@ export function TaskAttachments({
 	if (previewMode) {
 		return (
 			<section className='task-view-attachments' aria-label='Attachments'>
-				<Stack gap='sm' className='task-attachments'>
+				<div className='task-attachments task-attachments--preview'>
 					{errorAlert}
 
-					{loading ? (
-						<Group justify='center' py='sm'>
-							<Loader size='sm' />
-						</Group>
-					) : (
-						<>
-							{viewable.length > 0 ? (
-								<div className='task-attachments-preview-stack'>
-									{previewLoading &&
-									viewable.some((a) => !previewUrls[a.id]) ? (
-										<Group justify='center' py='xs'>
-											<Loader size='xs' />
-										</Group>
-									) : null}
-									{viewable.map((attachment) => {
-										const url = previewUrls[attachment.id];
-										const label =
-											attachment.fileName ?? `Attachment #${attachment.id}`;
-										const busy = busyId === attachment.id;
-										const openViewer = () => {
-											if (url) setViewerAttachment(attachment);
-										};
+					<div className='task-attachments-scroll'>
+						{loading ? (
+							<Group justify='center' py='sm'>
+								<Loader size='sm' />
+							</Group>
+						) : (
+							<>
+								{viewable.length > 0 ? (
+									<div className='task-attachments-preview-stack'>
+										{previewLoading &&
+										viewable.some((a) => !previewUrls[a.id]) ? (
+											<Group justify='center' py='xs'>
+												<Loader size='xs' />
+											</Group>
+										) : null}
+										{viewable.map((attachment) => {
+											const url = previewUrls[attachment.id];
+											const label =
+												attachment.fileName ?? `Attachment #${attachment.id}`;
+											const busy = busyId === attachment.id;
+											const openViewer = () => {
+												if (url) setViewerAttachment(attachment);
+											};
 
-										return (
-											<figure
-												key={attachment.id}
-												className='task-attachments-preview'
-											>
-												{url ? (
-													<div
-														role='button'
-														tabIndex={0}
-														className='task-attachments-preview-open'
-														aria-label={`View ${label}`}
-														onClick={openViewer}
-														onKeyDown={(e) => {
-															if (e.key === 'Enter' || e.key === ' ') {
-																e.preventDefault();
-																openViewer();
-															}
-														}}
-													>
-														{attachment.mimeType.startsWith('image/') ? (
-															<img
-																src={url}
-																alt=''
-																className='task-attachments-preview-media'
-															/>
-														) : attachment.mimeType === 'application/pdf' ? (
-															<PdfPreview
-																url={url}
-																title={label}
-																className='task-attachments-preview-pdf'
-															/>
-														) : (
-															<iframe
-																title={label}
-																src={url}
-																className='task-attachments-preview-text'
-																tabIndex={-1}
-															/>
-														)}
-													</div>
-												) : (
-													<div className='task-attachments-preview-placeholder'>
-														<Loader size='xs' />
-													</div>
-												)}
-												<figcaption className='task-attachments-preview-caption'>
-													<button
-														type='button'
-														className='task-attachments-preview-name'
-														onClick={openViewer}
-														disabled={!url}
-													>
-														{label}
-													</button>
-													<Group gap={4} wrap='nowrap'>
-														<UnstyledButton
-															className='task-attachments-icon-btn'
-															aria-label='Download'
-															disabled={busy || uploading}
-															onClick={() => void handleDownload(attachment)}
+											return (
+												<figure
+													key={attachment.id}
+													className='task-attachments-preview'
+												>
+													{url ? (
+														<div
+															role='button'
+															tabIndex={0}
+															className='task-attachments-preview-open'
+															aria-label={`View ${label}`}
+															onClick={openViewer}
+															onKeyDown={(e) => {
+																if (e.key === 'Enter' || e.key === ' ') {
+																	e.preventDefault();
+																	openViewer();
+																}
+															}}
 														>
-															<Download size={16} strokeWidth={2} aria-hidden />
-														</UnstyledButton>
-														<UnstyledButton
-															className='task-attachments-icon-btn task-attachments-icon-btn--danger'
-															aria-label='Delete'
-															disabled={busy || uploading}
-															onClick={() => void handleDelete(attachment)}
+															{attachment.mimeType.startsWith('image/') ? (
+																<img
+																	src={url}
+																	alt=''
+																	className='task-attachments-preview-media'
+																/>
+															) : isVideoMime(attachment.mimeType) ? (
+																<div
+																	className='task-attachments-preview-media task-attachments-preview-video'
+																	aria-hidden
+																>
+																	<Film size={40} strokeWidth={1.75} />
+																	<span>Video</span>
+																</div>
+															) : attachment.mimeType === 'application/pdf' ? (
+																<PdfPreview
+																	url={url}
+																	title={label}
+																	className='task-attachments-preview-pdf'
+																/>
+															) : (
+																<iframe
+																	title={label}
+																	src={url}
+																	className='task-attachments-preview-text'
+																	tabIndex={-1}
+																/>
+															)}
+														</div>
+													) : (
+														<div className='task-attachments-preview-placeholder'>
+															<Loader size='xs' />
+														</div>
+													)}
+													<figcaption className='task-attachments-preview-caption'>
+														<button
+															type='button'
+															className='task-attachments-preview-name'
+															onClick={openViewer}
+															disabled={!url}
 														>
-															<Trash2 size={16} strokeWidth={2} aria-hidden />
-														</UnstyledButton>
-													</Group>
-												</figcaption>
-											</figure>
-										);
-									})}
-								</div>
-							) : null}
+															{label}
+														</button>
+														<Group gap={4} wrap='nowrap'>
+															<UnstyledButton
+																className='task-attachments-icon-btn'
+																aria-label='Download'
+																disabled={busy || uploading}
+																onClick={() => void handleDownload(attachment)}
+															>
+																<Download
+																	size={16}
+																	strokeWidth={2}
+																	aria-hidden
+																/>
+															</UnstyledButton>
+															<UnstyledButton
+																className='task-attachments-icon-btn task-attachments-icon-btn--danger'
+																aria-label='Delete'
+																disabled={busy || uploading}
+																onClick={() => void handleDelete(attachment)}
+															>
+																<Trash2
+																	size={16}
+																	strokeWidth={2}
+																	aria-hidden
+																/>
+															</UnstyledButton>
+														</Group>
+													</figcaption>
+												</figure>
+											);
+										})}
+									</div>
+								) : null}
 
-							{nonViewable.length > 0 ? (
-								<ul className='task-attachments-list'>
-									{nonViewable.map(renderListItem)}
-								</ul>
-							) : null}
+								{nonViewable.length > 0 ? (
+									<ul className='task-attachments-list'>
+										{nonViewable.map(renderListItem)}
+									</ul>
+								) : null}
 
-							{attachments.length === 0 ? (
-								<Text size='sm' c='dimmed'>
-									No attachments yet
-								</Text>
-							) : null}
-						</>
-					)}
+								{attachments.length === 0 ? (
+									<Text size='sm' c='dimmed'>
+										No attachments yet
+									</Text>
+								) : null}
+							</>
+						)}
+					</div>
 
-					{uploadControls}
-				</Stack>
+					<div className='task-attachments-footer'>{uploadControls}</div>
+				</div>
 
 				<AttachmentViewer
 					opened={viewerAttachment != null}

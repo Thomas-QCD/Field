@@ -56,22 +56,22 @@ Engineers, architects, and AI agents implementing Field. For agent quick-referen
 | Feature discipline  | MVP-first; avoid feature creep                                        |
 | Web platform        | React + TypeScript, mobile-responsive                                 |
 | Mobile platform     | Capacitor (iOS/Android), same codebase, **private distribution** (shared build) |
-| Web auth            | **Required** — local stub in dev; **Amazon Cognito** in production    |
+| Web auth            | **Required** — local stub in dev; **Microsoft Entra ID** (MSAL) in production. **No Cognito.** |
 | Mobile auth         | **QR activation** — durable on-device session; remotely revocable      |
 | Database            | **PostgreSQL** — Docker local and/or RDS `field-dev` (us-west-1)      |
 | Hosting             | **Local app**; AWS services provisioned only when requested           |
 
 ### 2.3 Development environment (local-first)
 
-App and API run locally. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-attachments`** are provisioned in `us-west-1` for cloud-backed development. Do not provision Cognito, SES, or other AWS resources unless requested.
+App and API run locally. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-attachments`** are provisioned in `us-west-1` for cloud-backed development. Do not provision SES or other AWS resources unless requested. **Do not provision Cognito** — web auth is Microsoft Entra ID.
 
-| Concern      | Local (current)                              | AWS (current / target)        |
+| Concern      | Local (current)                              | AWS / identity (current / target) |
 | ------------ | -------------------------------------------- | ----------------------------- |
 | Database     | Docker PostgreSQL **or** RDS `field-dev`     | **RDS `field-dev`** (us-west-1) |
 | API          | `localhost`                                  | API Gateway + ECS/Lambda      |
 | Web app      | Vite dev server                              | S3 + CloudFront               |
 | Files / PDFs | Attachments → S3 `field-dev-attachments`; PDF scripts → `./storage/documents` | S3          |
-| Web auth     | Dev auth stub or simple JWT                  | Cognito                       |
+| Web auth     | Dev auth stub or simple JWT                  | **Microsoft Entra ID** (MSAL) — not Cognito |
 | Email        | Console, file, or Mailpit                    | SES                           |
 
 Use **provider abstractions** (storage, email, auth) so AWS can be swapped in without rewriting business logic. Agents must not create AWS resources unless the user explicitly requests them.
@@ -100,12 +100,15 @@ flowchart TB
         Mobile[Mobile App - Capacitor]
     end
 
+    subgraph identity [Identity - web only]
+        Entra[Microsoft Entra ID]
+    end
+
     subgraph aws [AWS - integrate when user specifies]
         CF[CloudFront]
         S3Web[S3 - static web]
         APIGW[API Gateway]
         API[API Service]
-        Cognito[Cognito - web only]
         RDS[(RDS PostgreSQL)]
         S3Files[S3 - attachments and PDFs]
         SES[SES - email]
@@ -113,7 +116,7 @@ flowchart TB
     end
 
     Web --> CF --> S3Web
-    Web --> Cognito
+    Web --> Entra
     Web --> APIGW
     Mobile --> APIGW
     APIGW --> API
@@ -127,8 +130,8 @@ flowchart TB
 
 | Role                       | Client             | Auth                              | Primary actions                                              |
 | -------------------------- | ------------------ | --------------------------------- | ------------------------------------------------------------ |
-| **Task creator**           | Web                | Yes (local / Cognito)             | Create tasks, assign crew, view task board                   |
-| **Admin**                  | Web                | Yes (local / Cognito)             | Manage tasks, users, documents, emails, mobile devices       |
+| **Task creator**           | Web                | Yes (local / Entra SSO)           | Create tasks, assign crew, view task board                   |
+| **Admin**                  | Web                | Yes (local / Entra SSO)           | Manage tasks, users, documents, emails, mobile devices       |
 | **Crew member**            | Mobile (Capacitor) | QR activation → device session    | View assigned tasks, update status, capture photos, complete |
 
 The mobile app is a **shared private build** that ships **deactivated**. A crew member activates by scanning a QR issued for their user; the device keeps a durable session until revoked remotely.
@@ -142,8 +145,8 @@ The mobile app is a **shared private build** that ships **deactivated**. A crew 
 └─────────────┘     └──────────────┘     └─────────────┘     └──────────────┘
        │                    │                    │                    │
        ▼                    ▼                    ▼                    ▼
-  task created         status: assigned      status: loaded/      status: completed
-                       docket PDF (TBD)      arrived              POD PDF + email
+  task created         status: assigned      status: loaded /     status: completed
+                       docket PDF (TBD)      in progress          POD PDF + email
 ```
 
 Side effects (PDF generation, email) hook into **status transitions** and completion. Exact triggers are TBD — see Section 8.
@@ -167,7 +170,7 @@ One React + TypeScript codebase with **runtime branching**:
 │                  React + TypeScript App                  │
 ├─────────────────────────┬───────────────────────────────┤
 │   Browser (web)         │   Capacitor shell (mobile)    │
-│   - Login (local/Cognito)│   - Deactivated until QR      │
+│   - Login (local/Entra) │   - Deactivated until QR      │
 │   - Full creator UI     │   - QR scan → durable session │
 │   - Auth-gated routes   │   - Crew UI when activated    │
 │   - Issue / revoke QR   │   - Remote revoke → re-scan   │
@@ -180,7 +183,7 @@ Detect environment via Capacitor API (`Capacitor.isNativePlatform()`). On mobile
 
 | Pattern        | Client    | Authentication                                 | Endpoints (examples)                              |
 | -------------- | --------- | ---------------------------------------------- | ------------------------------------------------- |
-| **Web API**    | Browser   | JWT (local dev auth or Cognito)                | CRUD tasks, assign, admin, download PDFs, issue/revoke mobile |
+| **Web API**    | Browser   | JWT (local dev auth or Entra ID)               | CRUD tasks, assign, admin, download PDFs, issue/revoke mobile |
 | **Mobile API** | Capacitor | Device session token (from QR activation)      | Activate via QR, list/update **own** tasks, upload photos |
 
 Mobile requests send the device session token (e.g. `Authorization: Bearer <deviceSessionToken>`). API resolves `userId` from the session, rejects revoked sessions with `401`, and returns only tasks where that user appears in `task_crew_members`. Do not expose mobile write endpoints without this scoping.
@@ -228,11 +231,11 @@ create → assign → execute → complete | fail
 | `created`    | Created    | No       |
 | `unassigned` | Unassigned | No       |
 | `assigned`   | Assigned   | No       |
-| `loaded`     | Loaded     | No       |
-| `arrived`    | Arrived    | No       |
-| `completed`  | Completed  | Yes      |
-| `failed`     | Failed     | Yes      |
-| `cancelled`  | Cancelled  | Yes      |
+| `loaded`       | Loaded      | No       |
+| `in_progress`  | In Progress | No       |
+| `completed`    | Completed   | Yes      |
+| `failed`       | Failed      | Yes      |
+| `cancelled`    | Cancelled   | Yes      |
 
 ### 5.4 Status transitions (draft)
 
@@ -240,15 +243,15 @@ create → assign → execute → complete | fail
 created       → unassigned | assigned
 unassigned    → assigned
 assigned      → loaded | failed
-loaded        → arrived | failed
-arrived       → completed | failed
+loaded        → in_progress | failed
+in_progress   → completed | failed
 completed     → (terminal)
 failed        → (terminal)
 ```
 
 **Crew Start / End** (separate from admin status PATCH): each assigned crew member logs at most one `started` and one `ended` in `task_crew_events` (time + optional GPS). Task status is derived:
 
-- First crew **Start** → `Arrived` (unless already Arrived or terminal)
+- First crew **Start** → `In Progress` (unless already In Progress or terminal)
 - When every crew member who **Started** has also **Ended** → `Completed` (assigned crew who never started do not block)
 
 Confirm remaining admin transitions with operations before enforcing in code.
@@ -257,10 +260,10 @@ Confirm remaining admin transitions with operations before enforcing in code.
 
 | Entity                            | Purpose                                           |
 | --------------------------------- | ------------------------------------------------- |
-| `users`                           | Creators, crew members, admins; web auth via Cognito |
+| `users`                           | Creators, crew members, admins; web auth via Entra ID |
 | `mobile_activation_codes`         | QR codes issued to activate a crew device         |
 | `mobile_devices`                  | Durable mobile sessions; remote revoke            |
-| `contacts`                      | Contacts (name, phone, email)                     |
+| `contacts`                      | Contacts (name, title, phone, email)              |
 | `addresses`                       | Destination (job site) locations                  |
 | `tasks`                           | Core work unit                                    |
 | `task_contacts`                 | Contacts assigned to a task (0..many)             |
@@ -294,7 +297,7 @@ Reference export: [`task-model.md`](task-model.md).
 - **Engine:** PostgreSQL 15+
 - **Local dev:** Docker Compose or native PostgreSQL on developer machine
 - **Production target:** Amazon RDS
-- **Keys:** `bigint` identity for most tables; `uuid` for `users.id` (= auth subject; Cognito `sub` in production)
+- **Keys:** `bigint` identity for most tables; `uuid` for `users.id` (= auth subject; Entra `oid` mapped to UUID in production)
 - **Timestamps:** `timestamptz`, UTC
 - **Coordinates:** `numeric(10,7)` lat/lng on `addresses`
 
@@ -371,10 +374,13 @@ Use a storage abstraction interface (`server/storage.mjs`). Attachment uploads u
 
 ### 7.1 Web authentication
 
-- **Local dev:** Simple auth stub — hardcoded dev users, local JWT, or session cookie. `users.id` can be seeded UUIDs.
-- **Production target:** Amazon Cognito User Pool — `users.id` = token `sub`
-- **Flow:** SPA login → JWT → API validates on each request
-- **User sync:** On login, create or update `users` row
+- **Local dev:** When Entra env vars are unset — stub login (user picker from `users` table). `users.id` can be seeded UUIDs.
+- **Production / SSO:** Microsoft Entra ID via MSAL — `users.id` = Entra `oid` (UUID). **Amazon Cognito is not used.**
+- **Flow:** SPA login via MSAL → Bearer JWT → API validates against Entra JWKS on each request
+- **User sync:** `POST /api/auth/session` creates or updates the `users` row (default role `admin` on first insert)
+- **Env (see `.env.example`):** `VITE_AZURE_CLIENT_ID`, `VITE_AZURE_TENANT_ID` (SPA); `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` (API); optional `AZURE_API_AUDIENCE`
+- **Entra app registration:** SPA platform; redirect `http://localhost:5173` (and production origin); Graph delegated `openid` `profile` `email` (+ `User.Read` if requested); admin consent as required by tenant
+- **Capacitor:** Never shows Entra login; ignores these env vars for the auth gate. When API Entra vars are set, unprotected mobile calls to `/api/*` get `401` until device-session auth lands — use unset Entra vars for Cap-against-local-API during development
 
 ### 7.2 Mobile (QR activation — durable session, remotely revocable)
 
@@ -383,13 +389,19 @@ The Capacitor app is a **shared private build** distributed internally (MDM, sid
 **Activation flow:**
 
 ```text
-1. Admin/creator (web) issues activation QR for a crew user
-2. Crew opens app → deactivated state → scans QR
-3. App POSTs activation code to API
+1. Admin/creator (web Users page) issues activation QR for a crew user
+2. Crew opens app → More → Scan activation QR
+3. App POSTs activation code to POST /api/mobile/activate
 4. API validates code → creates mobile_devices row → returns deviceSessionToken + user profile
-5. App stores session permanently on device (secure storage)
-6. Subsequent launches skip QR and use stored session
+5. App stores session permanently on device (Capacitor Preferences)
+6. Subsequent launches use stored session (Bearer device token)
 ```
+
+**QR payload (decided):**
+
+- Format: plain text `field1.<base64url-32-bytes>` (not a URL)
+- Single-use; TTL **24 hours** from issue
+- Server stores SHA-256 of the full string in `mobile_activation_codes.code_hash`
 
 **Remote revocation:**
 
@@ -406,6 +418,7 @@ interface MobileDeviceSession {
 	deviceSessionToken: string; // opaque; presented on every API call
 	userId: string; // UUID — matches users.id
 	displayName: string; // shown in app header
+	role: string;
 	apiBaseUrl: string;
 }
 ```
@@ -413,13 +426,14 @@ interface MobileDeviceSession {
 **Build approach:**
 
 - One shared IPA/APK for all crew — not a per-person build.
-- No Cognito, password login, or build-time `userId` in Capacitor builds.
-- First-run / inactive gate: QR scanner (Camera / barcode plugin).
+- No Entra/MSAL, Cognito, password login, or build-time `userId` in Capacitor builds.
+- Scan entry (MVP): More page → Scan activation QR (`@capacitor-mlkit/barcode-scanning`).
 
 **API behavior:**
 
-- `POST /mobile/activate` exchanges a valid QR payload for a device session.
-- Mobile middleware validates the device session token on protected routes.
+- `POST /api/mobile/activate` exchanges a valid QR payload for a device session (auth-exempt).
+- `POST /api/users/:id/mobile-activations` issues a code (web auth).
+- When Entra is enabled, Bearer may be an Entra JWT **or** a non-revoked device session token.
 - Scope all mobile queries to tasks where `task_crew_members.user_id = userId`.
 - Set `changed_by_user_id` and `uploaded_by_user_id` from the session's `userId`.
 - Reject status updates on tasks not assigned to that crew member.
@@ -550,7 +564,7 @@ Backend framework and OpenAPI spec are **not yet written**. Planned resource gro
 
 - **Stack:** React 18+, TypeScript, Vite, React Router, lucide-react
 - **Scaffold status:** Underway — app shell (hamburger + left nav) and **Tasks** page with mock data grid; auth and API not wired yet
-- **Auth:** Local dev login (production: Cognito hosted UI or embedded login)
+- **Auth:** Local dev login (production: Microsoft Entra ID via MSAL)
 - **Views (MVP):** Login, task list/board, task create/edit, task detail, assign crew, PDF download
 - **Responsive:** Mobile-first shell; usable on phone through desktop
 
@@ -611,7 +625,7 @@ Connection placeholders: [`.env.example`](../.env.example).
 | Secrets            | Secrets Manager                         | Master password for `field-dev`                      |
 | Static web hosting | S3 + CloudFront                         | Not yet                                              |
 | API                | API Gateway + ECS Fargate _(or Lambda)_ | Not yet                                              |
-| Auth               | Cognito                                 | Not yet (web only)                                   |
+| Auth               | Microsoft Entra ID (MSAL)               | Not yet (web only; Cognito out of scope)             |
 | Object storage     | S3 `field-dev-attachments`          | **Provisioned** (dev) — private, SSE-S3, CORS for web + Capacitor live reload |
 | Email              | SES                                     | Not yet                                              |
 | Async jobs         | SQS + Lambda _(optional)_               | Not yet                                              |
@@ -631,7 +645,7 @@ Infrastructure as Code (CDK or Terraform) — not yet; `field-dev` was created v
 
 ### 11.4 AWS MVP stack (when integrating)
 
-RDS is started. Next when requested: S3, Cognito, SES, one API compute target, CloudFront + S3 for web. Add SQS when PDF/email async is implemented.
+RDS is started. Next when requested: S3, SES, one API compute target, CloudFront + S3 for web. Web auth is Entra ID (not Cognito). Add SQS when PDF/email async is implemented.
 
 ---
 
@@ -641,7 +655,7 @@ RDS is started. Next when requested: S3, Cognito, SES, one API compute target, C
 
 | Area     | MVP deliverable                                                       |
 | -------- | --------------------------------------------------------------------- |
-| Web auth | Local dev login (Cognito when on AWS)                                 |
+| Web auth | Local dev login; Microsoft Entra ID SSO (not Cognito)                 |
 | Tasks    | Create, assign, list, view, status updates                            |
 | Mobile   | QR activation, crew task list, status update, photo upload (Capacitor) |
 | Data     | Core tables per [`database-design.md`](database-design.md) MVP subset |
@@ -669,7 +683,7 @@ RDS is started. Next when requested: S3, Cognito, SES, one API compute target, C
 5. **PDF pipeline** — one template, local `./storage/documents`
 6. **Email pipeline** — one trigger, local console/Mailpit
 7. **Remaining PDFs and email triggers** — expand matrix
-8. **AWS integration** — when user specifies; swap providers (S3, SES, Cognito)
+8. **AWS integration** — when user specifies; swap providers (S3, SES); web auth remains Entra ID
 
 Implement **vertical slices** (UI → API → DB → storage) per step, not horizontal layers.
 
@@ -694,7 +708,7 @@ Implement **vertical slices** (UI → API → DB → storage) per step, not hori
 
 | #   | Issue                                       | Impact               |
 | --- | ------------------------------------------- | -------------------- |
-| O1  | QR payload format, expiry, one-time vs multi-use | Security / UX        |
+| O1  | ~~QR payload format, expiry, one-time vs multi-use~~ **Decided:** `field1.<base64url>`, single-use, 24h | — |
 | O2  | One mobile device per user vs multiple           | Operations           |
 | O3  | PDF/email trigger matrix                    | Feature completeness |
 | O4  | PDF template layouts                        | Document quality     |

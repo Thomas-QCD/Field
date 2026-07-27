@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Group, Loader, Title, Box } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Plus } from 'lucide-react';
-import type {
-	ColDef,
-	RowClickedEvent,
-	ValueFormatterParams,
-} from 'ag-grid-community';
+import type { RowClickedEvent } from 'ag-grid-community';
 import { AllCommunityModule } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
 import {
@@ -21,35 +17,14 @@ import {
 	type NewContactFormValues,
 } from '../components/NewContactModal';
 import { ContactDetailModal } from '../components/ContactDetailModal';
-
-const emptyDash = (p: ValueFormatterParams<Contact, string>) =>
-	p.value?.trim() ? p.value : '—';
-
-const columnDefs: ColDef<Contact>[] = [
-	{
-		field: 'name',
-		headerName: 'Contact',
-		minWidth: 100,
-		flex: 1.2,
-	},
-	{
-		field: 'phone',
-		headerName: 'Phone',
-		valueFormatter: emptyDash,
-		minWidth: 88,
-		flex: 0.8,
-	},
-	{
-		field: 'email',
-		headerName: 'Email',
-		valueFormatter: emptyDash,
-		minWidth: 100,
-		flex: 1.2,
-	},
-];
+import {
+	AG_GRID_MOBILE_MQ,
+	contactColumnDefs,
+	getDefaultColDef,
+} from '../agGridDefaults';
 
 export function ContactsPage() {
-	const isMobile = useMediaQuery('(max-width: 47.9975em)');
+	const isMobile = useMediaQuery(AG_GRID_MOBILE_MQ);
 	const [newContactOpen, setNewContactOpen] = useState(false);
 	const [editingContact, setEditingContact] = useState<Contact | null>(null);
 	const [detailContactId, setDetailContactId] = useState<number | null>(null);
@@ -57,14 +32,7 @@ export function ContactsPage() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
-	const defaultColDef = useMemo<ColDef<Contact>>(
-		() => ({
-			sortable: true,
-			filter: true,
-			resizable: true,
-		}),
-		[],
-	);
+	const defaultColDef = useMemo(() => getDefaultColDef(isMobile), [isMobile]);
 
 	const refreshContacts = useCallback(async (signal?: AbortSignal) => {
 		setLoading(true);
@@ -89,6 +57,7 @@ export function ContactsPage() {
 	const handleSaveContact = async (values: NewContactFormValues) => {
 		const payload = {
 			name: values.name.trim(),
+			title: values.title.trim() || undefined,
 			phone: values.phone.trim() || undefined,
 			email: values.email.trim() || undefined,
 		};
@@ -127,6 +96,7 @@ export function ContactsPage() {
 			editingContact
 				? {
 						name: editingContact.name,
+						title: editingContact.title,
 						phone: editingContact.phone,
 						email: editingContact.email,
 					}
@@ -167,7 +137,7 @@ export function ContactsPage() {
 					<AgGridProvider modules={[AllCommunityModule]}>
 						<AgGridReact<Contact>
 							rowData={contacts}
-							columnDefs={columnDefs}
+							columnDefs={contactColumnDefs}
 							defaultColDef={defaultColDef}
 							getRowId={(p) => String(p.data.id)}
 							rowHeight={isMobile ? 40 : undefined}

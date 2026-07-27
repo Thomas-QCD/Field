@@ -3,6 +3,7 @@ import { apiFetch } from './client';
 export interface Contact {
 	id: number;
 	name: string;
+	title: string;
 	phone: string;
 	email: string;
 }
@@ -58,6 +59,7 @@ export async function searchContacts(
 
 export interface CreateContactInput {
 	name: string;
+	title?: string;
 	phone?: string;
 	email?: string;
 }

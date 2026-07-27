@@ -31,7 +31,10 @@ import {
 	Trash2,
 } from 'lucide-react';
 import type { TaskType } from '../types/task';
-import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES } from '../api/attachments';
+import {
+	attachmentAcceptAttr,
+	validateAttachmentFile,
+} from '../api/attachments';
 import { createContact, listContacts } from '../api/contacts';
 import { createAddress, listAddresses } from '../api/addresses';
 import { listCrewUsers } from '../api/users';
@@ -124,6 +127,21 @@ function resolvePocContactId(contactIds: number[]): number | null {
 	return contactIds[0] ?? null;
 }
 
+/** Keep MultiSelect pills renderable before async options load. */
+function withSelectedContactOptions(
+	options: { value: string; label: string }[],
+	selectedIds: number[],
+): { value: string; label: string }[] {
+	const byValue = new Map(options.map((o) => [o.value, o] as const));
+	for (const id of selectedIds) {
+		const value = String(id);
+		if (!byValue.has(value)) {
+			byValue.set(value, { value, label: `Contact #${id}` });
+		}
+	}
+	return Array.from(byValue.values());
+}
+
 function createEmptyForm(): NewTaskFormValues {
 	const now = defaultDateTimeLocal();
 	return {
@@ -152,6 +170,8 @@ interface NewTaskModalProps {
 	onClose: () => void;
 	/** When set, modal is in edit mode and form is seeded from these values. */
 	initialValues?: NewTaskFormValues | null;
+	/** Contact pills for edit mode before listContacts returns. */
+	initialContactOptions?: { value: string; label: string }[] | null;
 	/** Existing task id — enables live attachment upload/list while editing. */
 	taskId?: number | null;
 	onSave?: (
@@ -165,6 +185,7 @@ export function NewTaskModal({
 	opened,
 	onClose,
 	initialValues = null,
+	initialContactOptions = null,
 	taskId = null,
 	onSave,
 }: NewTaskModalProps) {
@@ -231,12 +252,9 @@ export function NewTaskModal({
 
 		const accepted: File[] = [];
 		for (const file of files) {
-			if (file.size <= 0) {
-				setAttachmentError(`“${file.name}” is empty`);
-				continue;
-			}
-			if (file.size > MAX_ATTACHMENT_BYTES) {
-				setAttachmentError(`“${file.name}” exceeds the 25 MB limit`);
+			const validationError = validateAttachmentFile(file);
+			if (validationError) {
+				setAttachmentError(validationError);
 				continue;
 			}
 			accepted.push(file);
@@ -268,11 +286,17 @@ export function NewTaskModal({
 	const handleCreateContact = async (values: NewContactFormValues) => {
 		const contact = await createContact({
 			name: values.name.trim(),
+			title: values.title.trim() || undefined,
 			phone: values.phone.trim() || undefined,
 			email: values.email.trim() || undefined,
 		});
 		const shortName = formatShortName(contact.name);
-		const label = contact.email ? `${shortName} (${contact.email})` : shortName;
+		const title = contact.title.trim();
+		const label = title
+			? `${shortName} (${title})`
+			: contact.email
+				? `${shortName} (${contact.email})`
+				: shortName;
 		setContactOptions((prev) => {
 			if (prev.some((o) => o.value === String(contact.id))) return prev;
 			return [...prev, { value: String(contact.id), label }];
@@ -354,8 +378,17 @@ export function NewTaskModal({
 		setNewContactOpen(false);
 		setNewAddressOpen(false);
 		setAddressSeed(null);
+		if (initialContactOptions?.length) {
+			setContactOptions((prev) => {
+				const byValue = new Map(prev.map((o) => [o.value, o] as const));
+				for (const option of initialContactOptions) {
+					byValue.set(option.value, option);
+				}
+				return Array.from(byValue.values());
+			});
+		}
 		if (attachmentInputRef.current) attachmentInputRef.current.value = '';
-	}, [opened, initialValues]);
+	}, [opened, initialValues, initialContactOptions]);
 
 	useEffect(() => {
 		if (!opened) return;
@@ -388,9 +421,14 @@ export function NewTaskModal({
 				setContactOptions(
 					contacts.map((c) => {
 						const shortName = formatShortName(c.name);
+						const title = c.title.trim();
 						return {
 							value: String(c.id),
-							label: c.email ? `${shortName} (${c.email})` : shortName,
+							label: title
+								? `${shortName} (${title})`
+								: c.email
+									? `${shortName} (${c.email})`
+									: shortName,
 						};
 					}),
 				);
@@ -433,10 +471,11 @@ export function NewTaskModal({
 			opened={opened}
 			onClose={handleClose}
 			title={isEdit ? 'Edit Task' : 'New Task'}
-			size='lg'
+			size='800px'
 			centered
 			closeOnClickOutside={false}
 			closeOnEscape={!saving}
+			classNames={{ content: 'task-form-modal' }}
 			styles={{
 				title: { fontWeight: 700, fontSize: 14 },
 				body: { paddingTop: 4, fontSize: 14 },
@@ -500,7 +539,7 @@ export function NewTaskModal({
 				</Group>
 				<MultiSelect
 					size={inputSize}
-					data={contactOptions}
+					data={withSelectedContactOptions(contactOptions, form.contactIds)}
 					value={form.contactIds.map(String)}
 					onChange={(v) => {
 						const contactIds = v
@@ -527,6 +566,7 @@ export function NewTaskModal({
 						},
 					}}
 					renderPill={({ option, onRemove }) => {
+						if (!option) return null;
 						const isPoc =
 							form.contactIds[0] != null &&
 							String(form.contactIds[0]) === option.value;
@@ -835,7 +875,7 @@ export function NewTaskModal({
 							ref={attachmentInputRef}
 							id={attachmentInputId}
 							type='file'
-							accept={ATTACHMENT_ACCEPT}
+							accept={attachmentAcceptAttr()}
 							multiple
 							className='task-attachments-input'
 							disabled={saving}

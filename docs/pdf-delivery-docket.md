@@ -24,22 +24,19 @@ Single page, portrait, white background. Label/value rows (label left, value rig
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ Task ID: {id}              Completed on {completed_at}      │  ← completed line only if completed
-│ Delivery Docket                                             │
-│ Company          {company_name}                             │
+│ [logo]                               Delivery Docket        │
+│ Task ID: {id}  External ID: {key}  Completed on {…}         │  ← completed only if present
 │                                                             │
 │ Destination Location                                        │
-│ Contact        …                                          │
+│ Location         …                                          │
+│ Contact          …                                          │
 │ Address          …                                          │
 │ Building         …                                          │
 │ Email            …                                          │
 │ Phone            …                                          │
-│ Instructions     …                                          │
 │                                                             │
 │ Summary                                                     │
-│ External ID      …                                          │
 │ Type             …                                          │
-│ Priority         …                                          │
 │ Crew             …                                          │
 │ Status           …                                          │
 │ Created          …                                          │
@@ -61,29 +58,28 @@ Single page, portrait, white background. Label/value rows (label left, value rig
 
 | Element | Notes |
 |---------|--------|
+| Logo | `public/logoColor.png` — top-left |
+| Title | Literal `Delivery Docket` — top-right, vertically centered with logo |
 | Task ID | Short/hex style in sample (`28D5AAE802`); Field may use numeric `Id` until format is decided |
-| Completed on | Right-aligned; omit or leave blank when status ≠ Completed |
-| Title | Literal `Delivery Docket` |
-| Company | Org display name (config, not a task field) — sample: `Quick Change Display` |
+| External ID | `ExternalKey` — same header row as Task ID |
+| Completed on | Right-aligned on the Task ID row; omit when status ≠ Completed |
 
 ### Destination Location
 
 | Label | Source field (task model) |
 |-------|---------------------------|
-| Contact | `RecipientName` |
-| Address | `DestinationAddress` |
+| Location | `addresses.address_name` (venue label) |
+| Contact | `RecipientName` / `contacts.name` via `task_contacts` |
+| Address | `DestinationAddress` / `addresses.street_line` |
 | Building | `DestinationBuilding` |
 | Email | `RecipientEmail` (may be comma-separated; print as stored) |
 | Phone | `RecipientPhone` |
-| Instructions | `DestinationNotes` |
 
 ### Summary
 
 | Label | Source field |
 |-------|--------------|
-| External ID | `ExternalKey` |
 | Type | `TaskType` |
-| Priority | Not in draft task model yet — sample used `Normal`; default `Normal` until modeled |
 | Crew | Assigned crew member display name (`DriverName` in reference export) |
 | Status | `Status` |
 | Created | `CreatedDateTime` (display: `MMM D YYYY h:mm A`) |
@@ -116,7 +112,7 @@ Single page, portrait, white background. Label/value rows (label left, value rig
 - Empty / null → `n/a`
 - Datetimes in body: `MMM D YYYY h:mm A` (e.g. `Jul 15 2026 01:09 PM`)
 - Footer timestamp: `yyyy-mm-dd HH:mm` (24h)
-- Company name appears in header row and footer
+- Logo brands the header; company name appears in the footer only
 
 ---
 
@@ -129,15 +125,14 @@ Local script uses a JSON fixture shaped for the docket (not the full DB row). Ma
   "taskId": "28D5AAE802",
   "companyName": "Quick Change Display",
   "completedAt": "2026-07-15T13:09:00",
+  "destinationAddressName": "City National Arena",
   "contactName": "CNA - City National Arena",
   "destinationAddress": "1550 S Pavilion Center Dr, Las Vegas, NV 89135, USA",
   "destinationBuilding": null,
   "contactEmail": "jpackard@VegasGoldenKnights.com",
   "contactPhone": null,
-  "destinationNotes": null,
   "externalKey": "99290",
   "taskType": "Delivery",
-  "priority": "Normal",
   "crewName": "Rick Sekikawa",
   "status": "Completed",
   "createdAt": "2026-07-15T11:36:00",
@@ -153,12 +148,14 @@ Local script uses a JSON fixture shaped for the docket (not the full DB row). Ma
 
 | Concern | Choice (MVP) |
 |---------|----------------|
-| Library | **PDFKit** (`scripts/generate-delivery-docket.mjs`) |
-| Output | `storage/documents/delivery-docket-{taskId}.pdf` |
-| API / triggers | Not wired yet — script only |
+| Library | **PDFKit** (`server/deliveryDocket.mjs`) |
+| Output | `storage/documents/delivery-docket-{taskId}.pdf` + `task_documents` row |
+| API | `GET /api/tasks/:id/delivery-docket` — generates, stores, returns PDF |
+| UI | Task detail → More actions → Print delivery docket |
+| CLI | `npm run pdf:docket` (fixture) |
 | Shipping label / separate POD PDF | Separate templates later |
 
-When the API exists: enqueue job → render with same layout helpers → write storage → insert `task_documents` (`kind = delivery_docket`).
+When printing from the UI: load task → render with same layout helpers → write `storage/documents` → upsert `task_documents` (`kind = delivery_docket`) → return PDF.
 
 ---
 
@@ -166,5 +163,4 @@ When the API exists: enqueue job → render with same layout helpers → write s
 
 - Task ID format on docket: short hex (source) vs numeric `Id`?
 - Where does **Received by** name live (completion form field vs free text in notes)?
-- Is **Priority** required on tasks, or always `Normal` for now?
 - Regenerate docket on every status change, or only on assign + on complete?

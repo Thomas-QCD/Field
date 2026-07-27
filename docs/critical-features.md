@@ -25,7 +25,7 @@ The system must generate PDF documents tied to tasks. Three document types are c
 
 **Documented so far:**
 
-- **Delivery docket** layout + field map: [`pdf-delivery-docket.md`](pdf-delivery-docket.md) (from licensed-product sample). Local generator: `npm run pdf:docket`.
+- **Delivery docket** layout + field map: [`pdf-delivery-docket.md`](pdf-delivery-docket.md) (from licensed-product sample). Generator: `server/deliveryDocket.mjs` — `GET /api/tasks/:id/delivery-docket` / UI Print / `npm run pdf:docket`.
 
 **Not yet defined:**
 
@@ -35,7 +35,7 @@ The system must generate PDF documents tied to tasks. Three document types are c
 
 **Likely implementation:**
 
-- Template-based PDF generation in the API layer — **PDFKit** for delivery docket MVP (`scripts/generate-delivery-docket.mjs`); wire into API later.
+- Template-based PDF generation in the API layer — **PDFKit** for delivery docket (`server/deliveryDocket.mjs`); shipping label / POD later.
 - One template per document type; version templates as requirements stabilize.
 
 ---

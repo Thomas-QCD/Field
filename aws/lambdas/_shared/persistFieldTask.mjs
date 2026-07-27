@@ -1,5 +1,3 @@
-import { getPool } from "./db.mjs";
-
 export const WODELY_SYNC_USER_ID = "a0000000-0000-4000-8000-000000000001";
 
 const FIELD_STATUSES = new Set([
@@ -7,9 +5,10 @@ const FIELD_STATUSES = new Set([
   "Unassigned",
   "Assigned",
   "Loaded",
-  "Arrived",
+  "In Progress",
   "Completed",
   "Failed",
+  "Undetermined",
   "Cancelled",
 ]);
 
@@ -138,10 +137,11 @@ export function mapTaskType(typeDesc) {
 export function mapTaskStatus(statusDesc, webhookState) {
   if (webhookState === "Cancelled") return "Cancelled";
   if (statusDesc === "Transit") return "Loaded";
+  if (statusDesc === "Arrived") return "In Progress";
   if (FIELD_STATUSES.has(statusDesc)) return statusDesc;
   if (webhookState === "Completed") return "Completed";
   if (webhookState === "Failed") return "Failed";
-  if (webhookState === "Driver arrived") return "Arrived";
+  if (webhookState === "Driver arrived") return "In Progress";
   if (webhookState === "Package loaded/picked up") return "Loaded";
   if (webhookState === "Driver assigned") return "Assigned";
   if (webhookState === "Created") return "Unassigned";
@@ -201,7 +201,7 @@ function asOptionalNumber(value) {
  * Upsert a Wodely task into Field Postgres.
  *
  * @param {Record<string, unknown>} raw
- * @param {{ webhookState?: string | null }} [options]
+ * @param {{ webhookState?: string | null, pool?: import("pg").Pool }} [options]
  */
 export async function persistFieldTask(raw, options = {}) {
   const task = normalizeWodelyTask(raw);
@@ -223,7 +223,8 @@ export async function persistFieldTask(raw, options = {}) {
   const crewSize = asOptionalInt(task.guys);
   const estimatedHours = asOptionalNumber(task.hours);
 
-  const pool = await getPool();
+  const pool =
+    options.pool ?? (await (await import("./db.mjs")).getPool());
   const client = await pool.connect();
 
   try {

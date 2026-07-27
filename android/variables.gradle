@@ -13,4 +13,12 @@ ext {
     androidxJunitVersion = '1.2.1'
     androidxEspressoCoreVersion = '3.6.1'
     cordovaAndroidVersion = '10.1.1'
+    // @capacitor-mlkit/barcode-scanning defaults to CameraX 1.1.0 (not 16 KB aligned).
+    // Capawesome: override to 1.4.2+ for libimage_processing_util_jni.so.
+    androidxCameraCamera2Version = '1.4.2'
+    androidxCameraCoreVersion = '1.4.2'
+    androidxCameraLifecycleVersion = '1.4.2'
+    androidxCameraViewVersion = '1.4.2'
+    mlkitBarcodeScanningVersion = '17.3.0'
+    playServicesCodeScannerVersion = '16.1.0'
 }

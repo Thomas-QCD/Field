@@ -19,6 +19,8 @@ function mergeModalStyles(
 				...extra,
 				inner: { ...resolved.inner, ...extra.inner },
 				content: { ...resolved.content, ...extra.content },
+				body: { ...resolved.body, ...extra.body },
+				header: { ...resolved.header, ...extra.header },
 			};
 		};
 	}
@@ -29,6 +31,8 @@ function mergeModalStyles(
 		...extra,
 		inner: { ...resolved.inner, ...extra.inner },
 		content: { ...resolved.content, ...extra.content },
+		body: { ...resolved.body, ...extra.body },
+		header: { ...resolved.header, ...extra.header },
 	};
 }
 
@@ -40,6 +44,14 @@ const TOP_INSET =
 const BOTTOM_INSET =
 	'max(5dvh, calc(var(--field-shell-footer, 0px) + var(--field-modal-gap, 8px)))';
 
+type KeyboardAwareModalProps = ModalProps & {
+	/**
+	 * Keep a footer pinned: content does not scroll; put overflow on a
+	 * child scroll region instead (see task detail modal).
+	 */
+	pinFooter?: boolean;
+};
+
 /**
  * Mantine Modal capped to the visible app area (above footer /
  * device chrome) and lifted above the soft keyboard on mobile.
@@ -49,8 +61,9 @@ export function KeyboardAwareModal({
 	styles,
 	opened,
 	onClose,
+	pinFooter = false,
 	...props
-}: ModalProps) {
+}: KeyboardAwareModalProps) {
 	const keyboard = useVirtualKeyboard();
 	const lift = Boolean(opened && keyboard.isOpen && keyboard.height > 0);
 	const bottomInset = lift ? `${keyboard.height + 12}px` : BOTTOM_INSET;
@@ -66,9 +79,29 @@ export function KeyboardAwareModal({
 		},
 		content: {
 			maxHeight: `calc(100dvh - (${TOP_INSET}) - (${bottomInset}))`,
-			overflowY: 'auto',
+			...(pinFooter
+				? {
+						display: 'flex',
+						flexDirection: 'column' as const,
+						overflow: 'hidden',
+					}
+				: { overflowY: 'auto' as const }),
 		},
 	};
+
+	if (pinFooter) {
+		layoutStyles.header = {
+			flexShrink: 0,
+		};
+		layoutStyles.body = {
+			flex: 1,
+			minHeight: 0,
+			display: 'flex',
+			flexDirection: 'column',
+			overflow: 'hidden',
+			paddingBottom: 0,
+		};
+	}
 
 	return (
 		<Modal

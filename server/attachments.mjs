@@ -9,6 +9,7 @@ import {
 } from "./storage.mjs";
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_VIDEO_ATTACHMENT_BYTES = 150 * 1024 * 1024;
 
 /** @type {ReadonlySet<string>} */
 export const ALLOWED_MIME_TYPES = new Set([
@@ -23,13 +24,53 @@ export const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/csv",
   "text/plain",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
 ]);
 
 /**
  * @param {string} mimeType
  */
+export function normalizeMimeType(mimeType) {
+  // Strip parameters (e.g. "video/mp4; codecs=avc1") and whitespace.
+  return mimeType.toLowerCase().split(";")[0].trim();
+}
+
+/**
+ * @param {string} mimeType
+ */
+export function isVideoMimeType(mimeType) {
+  return normalizeMimeType(mimeType).startsWith("video/");
+}
+
+/**
+ * @param {string} mimeType
+ */
+export function maxBytesForMimeType(mimeType) {
+  return isVideoMimeType(mimeType)
+    ? MAX_VIDEO_ATTACHMENT_BYTES
+    : MAX_ATTACHMENT_BYTES;
+}
+
+/**
+ * @param {string} mimeType
+ * @param {number} maxBytes
+ */
+export function oversizeErrorMessage(mimeType, maxBytes) {
+  if (isVideoMimeType(mimeType)) {
+    return `Video exceeds ${Math.round(maxBytes / (1024 * 1024))} MB. Record at a lower resolution (try 1080p) if possible.`;
+  }
+  return `File exceeds ${Math.round(maxBytes / (1024 * 1024))} MB limit`;
+}
+
+/**
+ * @param {string} mimeType
+ */
 export function kindFromMimeType(mimeType) {
-  return mimeType.startsWith("image/") ? "photo" : "document";
+  if (mimeType.startsWith("image/")) return "photo";
+  if (isVideoMimeType(mimeType)) return "video";
+  return "document";
 }
 
 /**
@@ -145,7 +186,7 @@ export async function createPresign(taskId, body) {
   await assertTaskExists(taskId);
 
   const fileName = sanitizeFileName(requireString(body, "fileName"));
-  const mimeType = requireString(body, "mimeType").toLowerCase();
+  const mimeType = normalizeMimeType(requireString(body, "mimeType"));
   const uploadedByUserId = requireString(body, "uploadedByUserId");
 
   if (!ALLOWED_MIME_TYPES.has(mimeType)) {
@@ -169,11 +210,11 @@ export async function createPresign(taskId, body) {
       status: 400,
     });
   }
-  if (fileSizeBytes > MAX_ATTACHMENT_BYTES) {
-    throw Object.assign(
-      new Error(`File exceeds ${MAX_ATTACHMENT_BYTES} byte limit`),
-      { status: 400 },
-    );
+  const maxBytes = maxBytesForMimeType(mimeType);
+  if (fileSizeBytes > maxBytes) {
+    throw Object.assign(new Error(oversizeErrorMessage(mimeType, maxBytes)), {
+      status: 400,
+    });
   }
 
   const pool = getPool();
@@ -214,7 +255,7 @@ export async function confirmAttachment(taskId, body) {
   }
 
   const fileName = sanitizeFileName(requireString(body, "fileName"));
-  const mimeType = requireString(body, "mimeType").toLowerCase();
+  const mimeType = normalizeMimeType(requireString(body, "mimeType"));
   const uploadedByUserId = requireString(body, "uploadedByUserId");
 
   if (!ALLOWED_MIME_TYPES.has(mimeType)) {
@@ -238,11 +279,11 @@ export async function confirmAttachment(taskId, body) {
       status: 400,
     });
   }
-  if (fileSizeBytes > MAX_ATTACHMENT_BYTES) {
-    throw Object.assign(
-      new Error(`File exceeds ${MAX_ATTACHMENT_BYTES} byte limit`),
-      { status: 400 },
-    );
+  const maxBytes = maxBytesForMimeType(mimeType);
+  if (fileSizeBytes > maxBytes) {
+    throw Object.assign(new Error(oversizeErrorMessage(mimeType, maxBytes)), {
+      status: 400,
+    });
   }
 
   const captionRaw =

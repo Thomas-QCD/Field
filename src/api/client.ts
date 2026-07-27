@@ -43,9 +43,31 @@ export function apiUrl(path: string): string {
 	return p;
 }
 
-export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+type AccessTokenProvider = () => Promise<string | null>;
+
+let accessTokenProvider: AccessTokenProvider | null = null;
+
+/** Register a Bearer token provider (Entra MSAL on web / device session on mobile). Pass null to clear. */
+export function setAccessTokenProvider(provider: AccessTokenProvider | null) {
+	accessTokenProvider = provider;
+}
+
+export async function apiFetch(
+	path: string,
+	init?: RequestInit,
+): Promise<Response> {
 	const url = apiUrl(path);
-	return fetch(url, init).catch((err: unknown) => {
+	const headers = new Headers(init?.headers);
+
+	if (accessTokenProvider && !headers.has('Authorization')) {
+		const token = await accessTokenProvider();
+		if (token) headers.set('Authorization', `Bearer ${token}`);
+	}
+
+	let res: Response;
+	try {
+		res = await fetch(url, { ...init, headers });
+	} catch (err: unknown) {
 		// React effect cleanup aborts in-flight requests — leave those alone.
 		if (
 			(err instanceof DOMException || err instanceof Error) &&
@@ -55,5 +77,21 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 		}
 		const reason = err instanceof Error ? err.message : String(err);
 		throw new Error(`${reason} (${url})`);
-	});
+	}
+
+	if (
+		res.status === 401 &&
+		Capacitor.isNativePlatform() &&
+		!path.includes('/api/mobile/activate')
+	) {
+		// Dynamic import avoids a circular dependency with mobileSession.
+		const { clearMobileSession, getMobileSession } = await import(
+			'../auth/mobileSession'
+		);
+		if (getMobileSession()) {
+			await clearMobileSession();
+		}
+	}
+
+	return res;
 }

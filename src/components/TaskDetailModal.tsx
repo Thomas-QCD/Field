@@ -1,20 +1,28 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
 	Stack,
 	Group,
 	Text,
-	SimpleGrid,
 	Loader,
 	Alert,
 	Button,
-	Box,
 	Badge,
 	Divider,
 	Anchor,
 	Title,
+	Menu,
+	Textarea,
 } from '@mantine/core';
-import { Pencil, Trash2 } from 'lucide-react';
-import { getTask } from '../api/tasks';
+import {
+	Ellipsis,
+	FileText,
+	Pencil,
+	Printer,
+	RefreshCw,
+	Trash2,
+} from 'lucide-react';
+import { getTask, openDeliveryDocket, updateTaskStatus } from '../api/tasks';
+import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
 import { formatTimeAgo } from '../formatTime';
 import type { TaskDetail, TaskStatus } from '../types/task';
@@ -27,6 +35,7 @@ interface TaskDetailModalProps {
 	onClose: () => void;
 	onEdit?: (task: TaskDetail) => void;
 	onDelete?: (task: TaskDetail) => Promise<void>;
+	onStatusChange?: (task: { id: number; status: TaskStatus }) => void;
 }
 
 const STATUS_COLOR: Record<TaskStatus, string> = {
@@ -34,10 +43,24 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
 	Unassigned: 'yellow',
 	Assigned: 'blue',
 	Loaded: 'cyan',
-	Arrived: 'indigo',
+	'In Progress': 'indigo',
 	Completed: 'green',
 	Failed: 'red',
+	Undetermined: 'orange',
 	Cancelled: 'gray',
+};
+
+/** Mirrors server/createTask.mjs STATUS_TRANSITIONS (admin / manual). */
+const STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+	Created: ['Unassigned', 'Assigned'],
+	Unassigned: ['Assigned'],
+	Assigned: ['Loaded', 'In Progress', 'Failed'],
+	Loaded: ['In Progress', 'Failed'],
+	'In Progress': ['Completed', 'Failed', 'Undetermined'],
+	Completed: ['In Progress'],
+	Failed: [],
+	Undetermined: [],
+	Cancelled: [],
 };
 
 function formatDateTime(value: string | null): string {
@@ -84,33 +107,30 @@ function formatDateTimeWithAgo(value: string | null): string {
 	return ago ? `${absolute} (${ago})` : absolute;
 }
 
-function DetailField({
-	label,
-	value,
-	span = 1,
-}: {
-	label: string;
-	value: string;
-	span?: number;
-}) {
+function DetailField({ label, value }: { label: string; value: string }) {
 	return (
-		<Box style={{ gridColumn: span > 1 ? `span ${span}` : undefined }}>
-			<Text size='xs' c='dimmed' fw={600} tt='uppercase' mb={2}>
-				{label}
-			</Text>
-			<Text
-				size='sm'
-				style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-			>
-				{value || '—'}
-			</Text>
-		</Box>
+		<>
+			<dt className='task-detail-field-key'>{label}</dt>
+			<dd className='task-detail-field-value'>{value || '—'}</dd>
+		</>
 	);
 }
 
-function Section({ label, children }: { label: string; children: ReactNode }) {
+function DetailFields({ children }: { children: ReactNode }) {
+	return <dl className='task-detail-fields'>{children}</dl>;
+}
+
+function Section({
+	label,
+	children,
+	className,
+}: {
+	label: string;
+	children: ReactNode;
+	className?: string;
+}) {
 	return (
-		<Stack gap='sm'>
+		<Stack gap='sm' className={className}>
 			<Divider
 				label={
 					<Text size='xs' fw={700} tt='uppercase' c='dimmed'>
@@ -130,27 +150,40 @@ export function TaskDetailModal({
 	onClose,
 	onEdit,
 	onDelete,
+	onStatusChange,
 }: TaskDetailModalProps) {
+	const { user } = useCurrentUser();
 	const [task, setTask] = useState<TaskDetail | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [deleting, setDeleting] = useState(false);
-	const [deleteError, setDeleteError] = useState<string | null>(null);
+	const [actionBusy, setActionBusy] = useState(false);
+	const [actionError, setActionError] = useState<string | null>(null);
+	const [actionNotice, setActionNotice] = useState<string | null>(null);
+	const [pendingOutcome, setPendingOutcome] = useState<
+		'Completed' | 'Failed' | null
+	>(null);
+	const [statusNotes, setStatusNotes] = useState('');
 
 	useEffect(() => {
 		if (!opened || taskId == null) {
 			setTask(null);
 			setError(null);
 			setLoading(false);
-			setDeleting(false);
-			setDeleteError(null);
+			setActionBusy(false);
+			setActionError(null);
+			setActionNotice(null);
+			setPendingOutcome(null);
+			setStatusNotes('');
 			return;
 		}
 
 		const controller = new AbortController();
 		setLoading(true);
 		setError(null);
-		setDeleteError(null);
+		setActionError(null);
+		setActionNotice(null);
+		setPendingOutcome(null);
+		setStatusNotes('');
 		setTask(null);
 
 		getTask(taskId, controller.signal)
@@ -168,23 +201,126 @@ export function TaskDetailModal({
 		return () => controller.abort();
 	}, [opened, taskId]);
 
+	const handlePrintUnavailable = (label: string) => {
+		setActionError(null);
+		setActionNotice(`${label} is not available yet.`);
+	};
+
+	const handlePrintDeliveryDocket = async () => {
+		if (!task || actionBusy) return;
+		setActionBusy(true);
+		setActionError(null);
+		setActionNotice(null);
+		try {
+			await openDeliveryDocket(task.id);
+		} catch (err: unknown) {
+			setActionError(
+				err instanceof Error ? err.message : 'Failed to open delivery docket',
+			);
+		} finally {
+			setActionBusy(false);
+		}
+	};
+
+	const handleStatusChange = async (status: TaskStatus) => {
+		if (!task || actionBusy) return;
+
+		if (status === 'Completed' || status === 'Failed') {
+			setActionError(null);
+			setActionNotice(null);
+			setPendingOutcome(status);
+			setStatusNotes(
+				status === 'Failed'
+					? (task.failedReason ?? '')
+					: (task.completedNotes ?? ''),
+			);
+			return;
+		}
+
+		setActionBusy(true);
+		setActionError(null);
+		setActionNotice(null);
+		setPendingOutcome(null);
+		try {
+			const updated = await updateTaskStatus(task.id, status);
+			setTask((prev) =>
+				prev
+					? {
+							...prev,
+							status: updated.status,
+							completedAt: updated.completedAt,
+							completedNotes: updated.completedNotes,
+							failedReason: updated.failedReason,
+							completionNotes: updated.completionNotes,
+							completionNotesByName: updated.completionNotesByName,
+						}
+					: prev,
+			);
+			onStatusChange?.(updated);
+		} catch (err: unknown) {
+			setActionError(
+				err instanceof Error ? err.message : 'Failed to change status',
+			);
+		} finally {
+			setActionBusy(false);
+		}
+	};
+
+	const handleSaveOutcome = async () => {
+		if (!task || !pendingOutcome || actionBusy) return;
+		setActionBusy(true);
+		setActionError(null);
+		setActionNotice(null);
+		try {
+			const updated = await updateTaskStatus(task.id, pendingOutcome, {
+				notes: statusNotes.trim(),
+				userId: user?.id,
+			});
+			setTask((prev) =>
+				prev
+					? {
+							...prev,
+							status: updated.status,
+							completedAt: updated.completedAt,
+							completedNotes: updated.completedNotes,
+							failedReason: updated.failedReason,
+							completionNotes: updated.completionNotes,
+							completionNotesByName: updated.completionNotesByName,
+						}
+					: prev,
+			);
+			onStatusChange?.(updated);
+			setPendingOutcome(null);
+			setStatusNotes('');
+		} catch (err: unknown) {
+			setActionError(
+				err instanceof Error ? err.message : 'Failed to change status',
+			);
+		} finally {
+			setActionBusy(false);
+		}
+	};
+
 	const handleDelete = async () => {
 		if (!task || !onDelete) return;
 		const label = task.externalKey
 			? `#${task.externalKey}`
 			: `task #${task.id}`;
 		if (!window.confirm(`Delete ${label}?`)) return;
-		setDeleting(true);
-		setDeleteError(null);
+		setActionBusy(true);
+		setActionError(null);
+		setActionNotice(null);
 		try {
 			await onDelete(task);
 		} catch (err: unknown) {
-			setDeleteError(
+			setActionError(
 				err instanceof Error ? err.message : 'Failed to delete task',
 			);
-			setDeleting(false);
+			setActionBusy(false);
 		}
 	};
+
+	const statusOptions = task ? (STATUS_TRANSITIONS[task.status] ?? []) : [];
 
 	const title =
 		task?.externalKey != null && task.externalKey !== ''
@@ -193,10 +329,51 @@ export function TaskDetailModal({
 				? `#${taskId}`
 				: 'Task';
 
+	const completedNoteEntries =
+		task?.completionNotes?.filter((n) => n.outcome === 'Completed') ?? [];
+	const failedNoteEntries =
+		task?.completionNotes?.filter((n) => n.outcome === 'Failed') ?? [];
+	const hasLegacyCompleted =
+		Boolean(task?.completedNotes?.trim()) && completedNoteEntries.length === 0;
+	const hasLegacyFailed =
+		Boolean(task?.failedReason?.trim()) && failedNoteEntries.length === 0;
+	const showCompletionCallout =
+		Boolean(task) &&
+		(pendingOutcome != null ||
+			completedNoteEntries.length > 0 ||
+			failedNoteEntries.length > 0 ||
+			hasLegacyCompleted ||
+			hasLegacyFailed);
+
+	const renderNoteEntries = (
+		entries: NonNullable<TaskDetail['completionNotes']>,
+		outcome: 'Completed' | 'Failed',
+	) => (
+		<div className='task-detail-completion-list'>
+			{entries.map((entry) => {
+				const when = formatDateTime(entry.updatedAt || entry.createdAt);
+				const who = formatShortName(entry.displayName);
+				return (
+					<div key={entry.userId} className='task-detail-completion-entry'>
+						{entry.notes?.trim() ? (
+							<p className='task-detail-completion-notes'>
+								{entry.notes.trim()}
+							</p>
+						) : null}
+						<p className='task-detail-completion-meta'>
+							{outcome} at {when} by {who}
+						</p>
+					</div>
+				);
+			})}
+		</div>
+	);
+
 	return (
 		<KeyboardAwareModal
 			opened={opened}
 			onClose={onClose}
+			pinFooter
 			title={
 				task ? (
 					<Group gap='sm' wrap='nowrap'>
@@ -214,8 +391,12 @@ export function TaskDetailModal({
 					title
 				)
 			}
-			size='lg'
+			size='1200px'
 			centered
+			classNames={{
+				content: 'task-detail-modal',
+				body: 'task-detail-modal-body',
+			}}
 			styles={{
 				title: { fontWeight: 700 },
 				body: { paddingTop: 8 },
@@ -231,216 +412,388 @@ export function TaskDetailModal({
 					{error}
 				</Alert>
 			) : task ? (
-				<Stack gap='lg'>
-					<SimpleGrid cols={1} spacing='sm'>
-						<DetailField label='Created by' value={task.createdByName} />
-						{task.description ? (
-							<DetailField
-								label='Description'
-								value={task.description}
-								span={2}
-							/>
-						) : null}
-						<DetailField
-							label='Crew'
-							value={
-								task.crewMembers.length
-									? task.crewMembers
-											.map((m) => formatShortName(m.displayName))
-											.join(', ')
-									: 'Unassigned'
-							}
-						/>
-					</SimpleGrid>
+				<>
+					<div className='task-detail-scroll'>
+						<Stack gap='lg'>
+							<div className='task-detail-layout'>
+								<div className='task-detail-main'>
+									<Stack gap='lg'>
+										{showCompletionCallout ? (
+											<Stack gap='sm'>
+												{pendingOutcome ? (
+													<div
+														className={
+															pendingOutcome === 'Failed'
+																? 'task-detail-completion task-detail-completion--failed'
+																: 'task-detail-completion'
+														}
+													>
+														<Stack gap='sm'>
+															<Textarea
+																label={
+																	pendingOutcome === 'Failed'
+																		? 'Failed reason'
+																		: 'Completed notes'
+																}
+																value={statusNotes}
+																onChange={(e) =>
+																	setStatusNotes(e.currentTarget.value)
+																}
+																minRows={3}
+																autosize
+																disabled={actionBusy}
+															/>
+															<Group gap='xs'>
+																<Button
+																	color={
+																		pendingOutcome === 'Failed'
+																			? 'red'
+																			: 'brand'
+																	}
+																	loading={actionBusy}
+																	onClick={() => void handleSaveOutcome()}
+																>
+																	{pendingOutcome === 'Failed'
+																		? 'Save failed task'
+																		: 'Save completed task'}
+																</Button>
+																<Button
+																	variant='default'
+																	disabled={actionBusy}
+																	onClick={() => {
+																		setPendingOutcome(null);
+																		setStatusNotes('');
+																	}}
+																>
+																	Cancel
+																</Button>
+															</Group>
+														</Stack>
+													</div>
+												) : null}
 
-					<Section label='Contacts'>
-						{task.contacts.length === 0 ? (
-							<Text size='sm' c='dimmed'>
-								None
-							</Text>
-						) : (
-							<Stack gap='sm'>
-								{task.contacts.map((contact) => (
-									<Box key={contact.id}>
-										<Group gap={8} wrap='nowrap'>
-											<Text size='sm' fw={600}>
-												{formatShortName(contact.name)}
-											</Text>
-											{contact.isPoc ? (
-												<Text size='xs' fw={700} c='dimmed'>
-													POC
-												</Text>
+												{completedNoteEntries.length > 0 ? (
+													<div className='task-detail-completion'>
+														{renderNoteEntries(
+															completedNoteEntries,
+															'Completed',
+														)}
+													</div>
+												) : null}
+
+												{failedNoteEntries.length > 0 ? (
+													<div className='task-detail-completion task-detail-completion--failed'>
+														{renderNoteEntries(failedNoteEntries, 'Failed')}
+													</div>
+												) : null}
+
+												{hasLegacyCompleted ? (
+													<div className='task-detail-completion'>
+														<p className='task-detail-completion-notes'>
+															{task.completedNotes!.trim()}
+														</p>
+														{task.completedAt ||
+														task.completionNotesByName ? (
+															<p className='task-detail-completion-meta'>
+																Completed
+																{task.completedAt
+																	? ` at ${formatDateTime(task.completedAt)}`
+																	: ''}
+																{task.completionNotesByName
+																	? ` by ${formatShortName(task.completionNotesByName)}`
+																	: ''}
+															</p>
+														) : null}
+													</div>
+												) : null}
+
+												{hasLegacyFailed ? (
+													<div className='task-detail-completion task-detail-completion--failed'>
+														<p className='task-detail-completion-notes'>
+															{task.failedReason!.trim()}
+														</p>
+														{task.completionNotesByName ? (
+															<p className='task-detail-completion-meta'>
+																Failed by{' '}
+																{formatShortName(task.completionNotesByName)}
+															</p>
+														) : null}
+													</div>
+												) : null}
+											</Stack>
+										) : null}
+
+										<DetailFields>
+											<DetailField
+												label='Created by'
+												value={task.createdByName}
+											/>
+											{task.description ? (
+												<DetailField
+													label='Description'
+													value={task.description}
+												/>
 											) : null}
-										</Group>
-										{(contact.phone || contact.email) && (
-											<Group gap='md' mt={2}>
-												{contact.phone ? (
-													<Anchor
-														href={`tel:${contact.phone}`}
-														size='sm'
-														c='dimmed'
-													>
-														{contact.phone}
-													</Anchor>
-												) : null}
-												{contact.email ? (
-													<Anchor
-														href={`mailto:${contact.email}`}
-														size='sm'
-														c='dimmed'
-													>
-														{contact.email}
-													</Anchor>
-												) : null}
-											</Group>
-										)}
-									</Box>
-								))}
-							</Stack>
-						)}
-					</Section>
+											<DetailField
+												label='Crew'
+												value={
+													task.crewMembers.length
+														? task.crewMembers
+																.map((m) =>
+																	formatShortName(m.displayName),
+																)
+																.join(', ')
+														: 'Unassigned'
+												}
+											/>
+										</DetailFields>
 
-					<Section label='Destination'>
-						{task.destinationAddressId == null &&
-						!task.destinationAddressName &&
-						!task.destinationAddress ? (
-							<Text size='sm' c='dimmed'>
-								None
+										<Section label='Contacts'>
+											{task.contacts.length === 0 ? (
+												<Text size='sm' c='dimmed'>
+													None
+												</Text>
+											) : (
+												<DetailFields>
+													{task.contacts.map((contact) => (
+														<Fragment key={contact.id}>
+															<dt className='task-detail-field-key'>
+																{contact.isPoc ? 'POC' : 'Contact'}
+															</dt>
+															<dd className='task-detail-field-value'>
+																<span className='task-detail-contact-name'>
+																	{formatShortName(contact.name)}
+																</span>
+																{contact.title.trim() ? (
+																	<span className='task-detail-contact-title'>
+																		{contact.title.trim()}
+																	</span>
+																) : null}
+																{(contact.phone || contact.email) && (
+																	<span className='task-detail-contact-meta'>
+																		{contact.phone ? (
+																			<Anchor
+																				href={`tel:${contact.phone}`}
+																				size='sm'
+																				c='dimmed'
+																			>
+																				{contact.phone}
+																			</Anchor>
+																		) : null}
+																		{contact.phone && contact.email ? (
+																			<span aria-hidden> · </span>
+																		) : null}
+																		{contact.email ? (
+																			<Anchor
+																				href={`mailto:${contact.email}`}
+																				size='sm'
+																				c='dimmed'
+																			>
+																				{contact.email}
+																			</Anchor>
+																		) : null}
+																	</span>
+																)}
+															</dd>
+														</Fragment>
+													))}
+												</DetailFields>
+											)}
+										</Section>
+
+										<Section label='Destination'>
+											{task.destinationAddressId == null &&
+											!task.destinationAddressName &&
+											!task.destinationAddress ? (
+												<Text size='sm' c='dimmed'>
+													None
+												</Text>
+											) : (
+												<DetailFields>
+													<DetailField
+														label='Name'
+														value={task.destinationAddressName}
+													/>
+													<DetailField
+														label='Building'
+														value={task.destinationBuilding}
+													/>
+													<DetailField
+														label='Address'
+														value={task.destinationAddress}
+													/>
+													{task.destinationNotes ? (
+														<DetailField
+															label='Location notes'
+															value={task.destinationNotes}
+														/>
+													) : null}
+												</DetailFields>
+											)}
+										</Section>
+
+										<Section label='Schedule & crew'>
+											<DetailFields>
+												<DetailField
+													label='Window start'
+													value={formatDateTime(task.windowStartAt)}
+												/>
+												<DetailField
+													label='Window end'
+													value={formatDateTime(task.windowEndAt)}
+												/>
+												<DetailField
+													label='Window duration'
+													value={formatDuration(
+														task.windowStartAt,
+														task.windowEndAt,
+													)}
+												/>
+												<DetailField
+													label='Guys'
+													value={
+														task.crewSize != null
+															? String(task.crewSize)
+															: ''
+													}
+												/>
+												<DetailField
+													label='Hours'
+													value={
+														task.estimatedHours != null
+															? String(task.estimatedHours)
+															: ''
+													}
+												/>
+												<DetailField
+													label='Time specific'
+													value={task.isTimeSpecific ? 'Yes' : 'No'}
+												/>
+												<DetailField
+													label='Can start early'
+													value={task.canStartEarly ? 'Yes' : 'No'}
+												/>
+											</DetailFields>
+										</Section>
+									</Stack>
+								</div>
+
+								<aside className='task-detail-attachments'>
+									<Section
+										label='Attachments'
+										className='task-detail-attachments-section'
+									>
+										<TaskAttachments
+											taskId={task.id}
+											initialAttachments={task.attachments}
+											variant='plain'
+										/>
+									</Section>
+								</aside>
+							</div>
+
+							<Text>
+								Created {formatDateTimeWithAgo(task.createdAt)}
+								{<br />}
+								Updated {formatDateTimeWithAgo(task.updatedAt)}
 							</Text>
-						) : (
-							<SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
-								<DetailField label='Name' value={task.destinationAddressName} />
-								<DetailField
-									label='Building'
-									value={task.destinationBuilding}
-								/>
-								<DetailField
-									label='Address'
-									value={task.destinationAddress}
-									span={2}
-								/>
-								{task.destinationNotes ? (
-									<DetailField
-										label='Location notes'
-										value={task.destinationNotes}
-										span={2}
-									/>
-								) : null}
-							</SimpleGrid>
-						)}
-					</Section>
+						</Stack>
+					</div>
 
-					<Section label='Schedule & crew'>
-						<SimpleGrid cols={3} spacing='sm'>
-							<DetailField
-								label='Window start'
-								value={formatDateTime(task.windowStartAt)}
-							/>
-							<DetailField
-								label='Window end'
-								value={formatDateTime(task.windowEndAt)}
-							/>
-							<DetailField
-								label='Window Duration'
-								value={formatDuration(task.windowStartAt, task.windowEndAt)}
-							/>
-						</SimpleGrid>
-						<SimpleGrid cols={4} spacing='sm'>
-							<DetailField
-								label='Guys'
-								value={task.crewSize != null ? String(task.crewSize) : ''}
-							/>
-							<DetailField
-								label='Hours'
-								value={
-									task.estimatedHours != null ? String(task.estimatedHours) : ''
-								}
-							/>
-							<DetailField
-								label='Time specific'
-								value={task.isTimeSpecific ? 'Yes' : 'No'}
-							/>
-							<DetailField
-								label='Can start early'
-								value={task.canStartEarly ? 'Yes' : 'No'}
-							/>
-						</SimpleGrid>
-					</Section>
+					<div className='task-detail-footer'>
+						{actionNotice ? (
+							<Alert color='yellow' title='Unavailable' mb='sm'>
+								{actionNotice}
+							</Alert>
+						) : null}
 
-					<Section label='Attachments'>
-						<TaskAttachments
-							taskId={task.id}
-							initialAttachments={task.attachments}
-							variant='plain'
-						/>
-					</Section>
+						{actionError ? (
+							<Alert color='red' title='Action failed' mb='sm'>
+								{actionError}
+							</Alert>
+						) : null}
 
-					{(task.completedAt || task.completedNotes || task.failedReason) && (
-						<Section label='Completion'>
-							<SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
-								<DetailField
-									label='Completed at'
-									value={formatDateTime(task.completedAt)}
-								/>
-								<DetailField
-									label='Failed reason'
-									value={task.failedReason ?? ''}
-								/>
-								{task.completedNotes ? (
-									<DetailField
-										label='Completed notes'
-										value={task.completedNotes}
-										span={2}
-									/>
-								) : null}
-							</SimpleGrid>
-						</Section>
-					)}
-
-					<Text>
-						Created {formatDateTimeWithAgo(task.createdAt)}
-						{<br />}
-						Updated {formatDateTimeWithAgo(task.updatedAt)}
-					</Text>
-
-					{deleteError ? (
-						<Alert color='red' title='Could not delete task'>
-							{deleteError}
-						</Alert>
-					) : null}
-
-					<Group justify='space-between' gap='xs' wrap='nowrap'>
-						{onDelete ? (
+						<Group justify='space-between' gap='xs' wrap='nowrap'>
 							<Button
-								color='red'
-								variant='light'
-								leftSection={<Trash2 size={16} />}
-								onClick={() => void handleDelete()}
-								loading={deleting}
-								disabled={deleting}
+								variant='default'
+								onClick={onClose}
+								disabled={actionBusy}
 							>
-								Delete
-							</Button>
-						) : (
-							<span />
-						)}
-						<Group gap='xs' wrap='nowrap'>
-							<Button variant='default' onClick={onClose} disabled={deleting}>
 								Close
 							</Button>
-							{onEdit ? (
-								<Button
-									color='brand'
-									leftSection={<Pencil size={16} />}
-									onClick={() => onEdit(task)}
-									disabled={deleting}
-								>
-									Edit
-								</Button>
-							) : null}
+							<Group gap='xs' wrap='nowrap'>
+								{onEdit ? (
+									<Button
+										color='brand'
+										leftSection={<Pencil size={16} />}
+										onClick={() => onEdit(task)}
+										disabled={actionBusy}
+									>
+										Edit
+									</Button>
+								) : null}
+								<Menu shadow='md' width={220} position='top-end'>
+									<Menu.Target>
+										<Button
+											variant='default'
+											leftSection={<Ellipsis size={16} />}
+											loading={actionBusy}
+											disabled={actionBusy}
+										>
+											More actions
+										</Button>
+									</Menu.Target>
+									<Menu.Dropdown>
+										<Menu.Item
+											leftSection={<Printer size={16} />}
+											onClick={() => handlePrintUnavailable('Print task')}
+										>
+											Print task
+										</Menu.Item>
+										<Menu.Item
+											leftSection={<FileText size={16} />}
+											onClick={() => void handlePrintDeliveryDocket()}
+										>
+											Print delivery docket
+										</Menu.Item>
+										<Menu.Sub>
+											<Menu.Sub.Target>
+												<Menu.Sub.Item
+													leftSection={<RefreshCw size={16} />}
+													disabled={statusOptions.length === 0}
+												>
+													Change status
+												</Menu.Sub.Item>
+											</Menu.Sub.Target>
+											<Menu.Sub.Dropdown>
+												{statusOptions.map((status) => (
+													<Menu.Item
+														key={status}
+														onClick={() => void handleStatusChange(status)}
+													>
+														{status}
+													</Menu.Item>
+												))}
+											</Menu.Sub.Dropdown>
+										</Menu.Sub>
+										{onDelete ? (
+											<>
+												<Menu.Divider />
+												<Menu.Item
+													color='red'
+													leftSection={<Trash2 size={16} />}
+													onClick={() => void handleDelete()}
+												>
+													Delete task
+												</Menu.Item>
+											</>
+										) : null}
+									</Menu.Dropdown>
+								</Menu>
+							</Group>
 						</Group>
-					</Group>
-				</Stack>
+					</div>
+				</>
 			) : null}
 		</KeyboardAwareModal>
 	);

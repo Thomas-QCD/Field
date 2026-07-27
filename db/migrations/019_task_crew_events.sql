@@ -1,5 +1,5 @@
 -- Per-crew start/end check-in logs (time + optional GPS).
--- Task status: Arrived on first Start; Completed when all starters have Ended.
+-- Task status: In Progress on first Start; Completed when all starters have Ended.
 
 BEGIN;
 

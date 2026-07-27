@@ -129,6 +129,7 @@ export function ContactDetailModal({
 				<Stack gap='md'>
 					<SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
 						<DetailField label='Name' value={contact.name} span={2} />
+						<DetailField label='Title' value={contact.title} span={2} />
 						<DetailField label='Phone' value={contact.phone} />
 						<DetailField label='Email' value={contact.email} />
 					</SimpleGrid>

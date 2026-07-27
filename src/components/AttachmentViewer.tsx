@@ -17,6 +17,10 @@ function isImageMime(mimeType: string): boolean {
 	return mimeType.startsWith('image/');
 }
 
+function isVideoMime(mimeType: string): boolean {
+	return mimeType.startsWith('video/');
+}
+
 type TouchPoint = { clientX: number; clientY: number };
 
 function touchDistance(a: TouchPoint, b: TouchPoint): number {
@@ -42,6 +46,7 @@ export function AttachmentViewer({
 	onClose,
 }: AttachmentViewerProps) {
 	const imageRef = useRef<HTMLImageElement>(null);
+	const [videoFailed, setVideoFailed] = useState(false);
 	const transform = useRef({ scale: 1, x: 0, y: 0 });
 	const gesture = useRef({
 		mode: 'none' as 'none' | 'pan' | 'pinch',
@@ -70,6 +75,10 @@ export function AttachmentViewer({
 	};
 
 	useAndroidBackHandler(onClose, opened);
+
+	useEffect(() => {
+		setVideoFailed(false);
+	}, [url, mimeType, opened]);
 
 	useEffect(() => {
 		if (!opened) {
@@ -204,6 +213,42 @@ export function AttachmentViewer({
 					className='attachment-viewer-image'
 					draggable={false}
 				/>
+			</div>
+		);
+	} else if (isVideoMime(mimeType)) {
+		content = (
+			<div className='attachment-viewer-stage attachment-viewer-stage-video'>
+				{videoFailed || !url ? (
+					<div className='attachment-viewer-video-fallback'>
+						<p>
+							This video can’t play in this browser (phone recordings are often
+							HEVC/H.265). Download it to play in a native player.
+						</p>
+						{url ? (
+							<a
+								className='attachment-viewer-video-download'
+								href={url}
+								download={fileName}
+								target='_blank'
+								rel='noopener noreferrer'
+							>
+								Download video
+							</a>
+						) : null}
+					</div>
+				) : (
+					<video
+						key={url}
+						src={url}
+						controls
+						playsInline
+						preload='metadata'
+						className='attachment-viewer-video'
+						onError={() => setVideoFailed(true)}
+					>
+						{fileName}
+					</video>
+				)}
 			</div>
 		);
 	} else if (mimeType === 'application/pdf') {

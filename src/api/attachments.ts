@@ -1,10 +1,116 @@
+import { Capacitor } from '@capacitor/core';
 import type { TaskAttachment } from '../types/task';
 import { apiFetch } from './client';
 
+/**
+ * Web file-dialog hint. Prefer wildcards so browsers offer both photos and video.
+ * Exact types are still enforced by validateAttachmentFile / the API.
+ */
 export const ATTACHMENT_ACCEPT =
-	'image/jpeg,image/png,image/webp,image/heic,image/heif,image/gif,application/pdf,.docx,.xlsx,.csv,.txt';
+	'image/*,video/*,application/pdf,.docx,.xlsx,.csv,.txt';
+
+/**
+ * Native WebViews (esp. Android) often only honor the first accept token, so a
+ * list starting with images never surfaces videos. Omit accept on Capacitor and
+ * rely on client + server validation instead.
+ */
+export function attachmentAcceptAttr(): string | undefined {
+	if (Capacitor.isNativePlatform()) return undefined;
+	return ATTACHMENT_ACCEPT;
+}
+
+/** Photos + videos for the mobile Library picker (camera stays image-only). */
+export function mediaLibraryAcceptAttr(): string | undefined {
+	if (Capacitor.isNativePlatform()) return undefined;
+	return 'image/*,video/*';
+}
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_VIDEO_ATTACHMENT_BYTES = 150 * 1024 * 1024;
+
+const ALLOWED_MIME_TYPES = new Set([
+	'image/jpeg',
+	'image/png',
+	'image/webp',
+	'image/heic',
+	'image/heif',
+	'image/gif',
+	'application/pdf',
+	'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+	'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+	'text/csv',
+	'text/plain',
+	'video/mp4',
+	'video/webm',
+	'video/quicktime',
+]);
+
+export function isVideoMime(mimeType: string): boolean {
+	return mimeType.startsWith('video/');
+}
+
+export function maxBytesForMime(mimeType: string): number {
+	return isVideoMime(mimeType)
+		? MAX_VIDEO_ATTACHMENT_BYTES
+		: MAX_ATTACHMENT_BYTES;
+}
+
+export function oversizeErrorMessage(mimeType: string, maxBytes: number): string {
+	if (isVideoMime(mimeType)) {
+		return `Video exceeds ${Math.round(maxBytes / (1024 * 1024))} MB. Record at a lower resolution (try 1080p) if possible.`;
+	}
+	return `File exceeds ${Math.round(maxBytes / (1024 * 1024))} MB limit`;
+}
+
+export function resolveMimeType(file: File): string {
+	const name = file.name.toLowerCase();
+	// Prefer extension for known types — Android sometimes reports empty or odd MIME.
+	if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+	if (name.endsWith('.png')) return 'image/png';
+	if (name.endsWith('.webp')) return 'image/webp';
+	if (name.endsWith('.gif')) return 'image/gif';
+	if (name.endsWith('.heic')) return 'image/heic';
+	if (name.endsWith('.heif')) return 'image/heif';
+	if (name.endsWith('.pdf')) return 'application/pdf';
+	if (name.endsWith('.docx')) {
+		return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+	}
+	if (name.endsWith('.xlsx')) {
+		return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+	}
+	if (name.endsWith('.csv')) return 'text/csv';
+	if (name.endsWith('.txt')) return 'text/plain';
+	if (name.endsWith('.mp4') || name.endsWith('.m4v')) return 'video/mp4';
+	if (name.endsWith('.webm')) return 'video/webm';
+	if (name.endsWith('.mov')) return 'video/quicktime';
+
+	const fromBrowser = file.type.toLowerCase().split(';')[0].trim();
+	if (fromBrowser && ALLOWED_MIME_TYPES.has(fromBrowser)) return fromBrowser;
+	// Map common aliases Android may report
+	if (fromBrowser === 'video/x-m4v' || fromBrowser === 'video/mpeg') {
+		return 'video/mp4';
+	}
+	if (fromBrowser === 'image/jpg') return 'image/jpeg';
+	return fromBrowser;
+}
+
+/**
+ * Client-side size/type check before upload. Returns an error message or null.
+ */
+export function validateAttachmentFile(file: File): string | null {
+	if (file.size <= 0) {
+		return `“${file.name}” is empty`;
+	}
+	const mimeType = resolveMimeType(file);
+	if (!mimeType || !ALLOWED_MIME_TYPES.has(mimeType)) {
+		return `Unsupported or unknown file type: ${file.name}`;
+	}
+	const maxBytes = maxBytesForMime(mimeType);
+	if (file.size > maxBytes) {
+		return oversizeErrorMessage(mimeType, maxBytes);
+	}
+	return null;
+}
 
 export async function listAttachments(
 	taskId: number,
@@ -122,27 +228,6 @@ async function confirmAttachment(
 	return data.attachment;
 }
 
-function resolveMimeType(file: File): string {
-	if (file.type) return file.type.toLowerCase();
-	const name = file.name.toLowerCase();
-	if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
-	if (name.endsWith('.png')) return 'image/png';
-	if (name.endsWith('.webp')) return 'image/webp';
-	if (name.endsWith('.gif')) return 'image/gif';
-	if (name.endsWith('.heic')) return 'image/heic';
-	if (name.endsWith('.heif')) return 'image/heif';
-	if (name.endsWith('.pdf')) return 'application/pdf';
-	if (name.endsWith('.docx')) {
-		return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-	}
-	if (name.endsWith('.xlsx')) {
-		return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-	}
-	if (name.endsWith('.csv')) return 'text/csv';
-	if (name.endsWith('.txt')) return 'text/plain';
-	return '';
-}
-
 /**
  * Presign → PUT to S3 → confirm metadata row.
  */
@@ -151,17 +236,12 @@ export async function uploadAttachment(
 	file: File,
 	uploadedByUserId: string,
 ): Promise<TaskAttachment> {
-	if (file.size <= 0) {
-		throw new Error('File is empty');
-	}
-	if (file.size > MAX_ATTACHMENT_BYTES) {
-		throw new Error('File exceeds 25 MB limit');
+	const validationError = validateAttachmentFile(file);
+	if (validationError) {
+		throw new Error(validationError);
 	}
 
 	const mimeType = resolveMimeType(file);
-	if (!mimeType) {
-		throw new Error('Unsupported or unknown file type');
-	}
 
 	const presign = await presignAttachment(taskId, {
 		fileName: file.name,

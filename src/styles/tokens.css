@@ -26,8 +26,9 @@
   --color-status-unassigned: #a67c2e;
   --color-status-assigned: #2b6cb0;
   --color-status-loaded: #0d7a6f;
-  --color-status-arrived: #2f855a;
+  --color-status-in-progress: #2f855a;
   --color-status-completed: #525252;
+  --color-status-undetermined: #d9480f;
   --color-status-failed: #c53030;
 
   --font-sans: 'DM Sans', system-ui, sans-serif;

@@ -5,19 +5,32 @@ import {
 	Camera,
 	CheckCircle,
 	ChevronLeft,
+	Image,
 	MessageSquare,
 	Navigation,
 	Phone,
 	Play,
 } from 'lucide-react';
 import { getTask, createCrewEvent, type CrewEventType } from '../api/tasks';
+import {
+	listAttachments,
+	mediaLibraryAcceptAttr,
+	uploadAttachment,
+	validateAttachmentFile,
+} from '../api/attachments';
+import { MultiShotCamera } from '../components/MultiShotCamera';
 import { TaskAttachments } from '../components/TaskAttachments';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
 import { openMapsNavigation } from '../openMapsNavigation';
-import type { TaskContact, TaskDetail, TaskStatus } from '../types/task';
+import type {
+	TaskAttachment,
+	TaskContact,
+	TaskDetail,
+	TaskStatus,
+} from '../types/task';
 
 function formatWindow(start: string | null, end: string | null): string {
 	return `${formatShortDateTimeWithAgo(start)} – ${formatShortDateTimeWithAgo(end)}`;
@@ -51,6 +64,9 @@ function ContactBlock({ contact }: { contact: TaskContact }) {
 						<span className='task-view-contact-poc'>POC</span>
 					) : null}
 				</div>
+				{contact.title.trim() ? (
+					<div className='task-view-contact-title'>{contact.title.trim()}</div>
+				) : null}
 				{contact.email ? (
 					<a
 						className='task-view-contact-email'
@@ -112,8 +128,97 @@ function ActionButton({
 	);
 }
 
+function PhotoActionButton({
+	disabled,
+	onTakePhoto,
+	onPickLibrary,
+}: {
+	disabled?: boolean;
+	onTakePhoto: () => void;
+	onPickLibrary: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const wrapRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (!open) return;
+
+		const onPointerDown = (event: PointerEvent) => {
+			if (!wrapRef.current?.contains(event.target as Node)) {
+				setOpen(false);
+			}
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') setOpen(false);
+		};
+
+		document.addEventListener('pointerdown', onPointerDown);
+		document.addEventListener('keydown', onKeyDown);
+		return () => {
+			document.removeEventListener('pointerdown', onPointerDown);
+			document.removeEventListener('keydown', onKeyDown);
+		};
+	}, [open]);
+
+	return (
+		<div
+			ref={wrapRef}
+			className={
+				open ? 'task-view-photo task-view-photo--open' : 'task-view-photo'
+			}
+		>
+			<button
+				type='button'
+				className='task-view-action'
+				aria-expanded={open}
+				aria-haspopup='dialog'
+				disabled={disabled}
+				onClick={() => setOpen((prev) => !prev)}
+			>
+				<Camera size={22} strokeWidth={2} aria-hidden />
+				<span>Photo</span>
+			</button>
+			{open ? (
+				<div
+					className='task-view-photo-popover'
+					role='dialog'
+					aria-label='Photo options'
+				>
+					<button
+						type='button'
+						className='task-view-photo-option'
+						onClick={() => {
+							setOpen(false);
+							onTakePhoto();
+						}}
+					>
+						<Camera size={22} strokeWidth={2} aria-hidden />
+						<span>Camera</span>
+					</button>
+					<button
+						type='button'
+						className='task-view-photo-option'
+						onClick={() => {
+							setOpen(false);
+							onPickLibrary();
+						}}
+					>
+						<Image size={22} strokeWidth={2} aria-hidden />
+						<span>Library</span>
+					</button>
+				</div>
+			) : null}
+		</div>
+	);
+}
+
 function isTerminalStatus(status: TaskStatus): boolean {
-	return status === 'Completed' || status === 'Failed' || status === 'Cancelled';
+	return (
+		status === 'Completed' ||
+		status === 'Failed' ||
+		status === 'Undetermined' ||
+		status === 'Cancelled'
+	);
 }
 
 async function captureGeo(): Promise<{
@@ -148,14 +253,22 @@ function TaskViewBody({
 	task,
 	userId,
 	onCrewEvent,
+	onEndTask,
+	onAttachmentsChange,
 }: {
 	task: TaskDetail;
 	userId: string | null;
 	onCrewEvent: (eventType: CrewEventType) => Promise<void>;
+	onEndTask: () => void;
+	onAttachmentsChange: (attachments: TaskAttachment[]) => void;
 }) {
-	const cameraInputRef = useRef<HTMLInputElement>(null);
+	const libraryInputRef = useRef<HTMLInputElement>(null);
+	const cameraFallbackInputRef = useRef<HTMLInputElement>(null);
 	const [eventBusy, setEventBusy] = useState(false);
 	const [eventError, setEventError] = useState<string | null>(null);
+	const [mediaBusy, setMediaBusy] = useState(false);
+	const [mediaError, setMediaError] = useState<string | null>(null);
+	const [cameraOpen, setCameraOpen] = useState(false);
 	const address = task.destinationAddress.trim();
 	const destinationName = task.destinationAddressName.trim();
 	const canNavigate = Boolean(address);
@@ -163,20 +276,65 @@ function TaskViewBody({
 	const me = userId
 		? task.crewMembers.find((m) => m.id === userId)
 		: undefined;
+	const canReopenCompleted = task.status === 'Completed';
 	const canStart =
-		Boolean(me) && !me?.startedAt && !isTerminalStatus(task.status);
+		Boolean(me) &&
+		(canReopenCompleted ||
+			(!me?.startedAt && !isTerminalStatus(task.status)));
 	const canEnd =
 		Boolean(me?.startedAt) &&
 		!me?.endedAt &&
-		task.status !== 'Failed' &&
-		task.status !== 'Cancelled';
+		!isTerminalStatus(task.status);
 
 	const openCamera = () => {
-		cameraInputRef.current?.click();
+		setCameraOpen(true);
+	};
+
+	const openLibrary = () => {
+		libraryInputRef.current?.click();
+	};
+
+	const uploadMediaFiles = async (files: File[]) => {
+		if (files.length === 0) return;
+		if (!userId) {
+			setMediaError('Select a current user before uploading');
+			return;
+		}
+
+		setMediaBusy(true);
+		setMediaError(null);
+		try {
+			for (const file of files) {
+				const validationError = validateAttachmentFile(file);
+				if (validationError) {
+					throw new Error(validationError);
+				}
+				await uploadAttachment(task.id, file, userId);
+			}
+			const next = await listAttachments(task.id);
+			onAttachmentsChange(next);
+		} catch (err: unknown) {
+			setMediaError(err instanceof Error ? err.message : 'Upload failed');
+		} finally {
+			setMediaBusy(false);
+			if (libraryInputRef.current) libraryInputRef.current.value = '';
+			if (cameraFallbackInputRef.current) {
+				cameraFallbackInputRef.current.value = '';
+			}
+		}
 	};
 
 	const logCrewEvent = async (eventType: CrewEventType) => {
 		if (eventBusy) return;
+		if (
+			eventType === 'started' &&
+			task.status === 'Completed' &&
+			!window.confirm(
+				'This task is completed. Starting it will remove the completed status and change the task to In Progress. Continue?',
+			)
+		) {
+			return;
+		}
 		setEventBusy(true);
 		setEventError(null);
 		try {
@@ -192,45 +350,82 @@ function TaskViewBody({
 
 	return (
 		<div className='task-view-body'>
+			{cameraOpen ? (
+				<MultiShotCamera
+					onCancel={() => setCameraOpen(false)}
+					onUnavailable={() => {
+						setCameraOpen(false);
+						window.setTimeout(() => {
+							cameraFallbackInputRef.current?.click();
+						}, 0);
+					}}
+					onComplete={(files) => {
+						setCameraOpen(false);
+						void uploadMediaFiles(files);
+					}}
+				/>
+			) : null}
 			<input
-				ref={cameraInputRef}
+				ref={cameraFallbackInputRef}
 				type='file'
 				accept='image/*'
 				capture='environment'
 				hidden
 				aria-hidden
 				tabIndex={-1}
+				disabled={mediaBusy}
+				onChange={(e) =>
+					void uploadMediaFiles(Array.from(e.target.files ?? []))
+				}
+			/>
+			<input
+				ref={libraryInputRef}
+				type='file'
+				accept={mediaLibraryAcceptAttr()}
+				multiple
+				hidden
+				aria-hidden
+				tabIndex={-1}
+				disabled={mediaBusy}
+				onChange={(e) =>
+					void uploadMediaFiles(Array.from(e.target.files ?? []))
+				}
 			/>
 			<div className='task-view-actions' role='group' aria-label='Task actions'>
 				<ActionButton
 					label='Navigate'
 					icon={Navigation}
-					disabled={!canNavigate || eventBusy}
+					disabled={!canNavigate || eventBusy || mediaBusy}
 					onClick={() => openMapsNavigation(address)}
 				/>
 				<ActionButton
 					label='Start task'
 					icon={Play}
-					disabled={!canStart || eventBusy}
+					disabled={!canStart || eventBusy || mediaBusy}
 					onClick={() => void logCrewEvent('started')}
 				/>
 				<ActionButton
 					label='End task'
 					icon={CheckCircle}
-					disabled={!canEnd || eventBusy}
-					onClick={() => void logCrewEvent('ended')}
+					disabled={!canEnd || eventBusy || mediaBusy}
+					onClick={onEndTask}
 				/>
-				<ActionButton
-					label='Photo'
-					icon={Camera}
-					disabled={eventBusy}
-					onClick={openCamera}
+				<PhotoActionButton
+					disabled={eventBusy || mediaBusy}
+					onTakePhoto={openCamera}
+					onPickLibrary={openLibrary}
 				/>
 			</div>
 
 			{eventError ? (
 				<Alert color='red' title='Check-in failed'>
 					{eventError}
+				</Alert>
+			) : null}
+
+			{mediaError ? (
+				<Alert color='red' title='Upload failed'>
+					{mediaError}
 				</Alert>
 			) : null}
 
@@ -302,6 +497,56 @@ function TaskViewBody({
 				/>
 			</div>
 
+			{(task.completionNotes?.length ?? 0) > 0
+				? task.completionNotes.map((entry) => {
+						const at = entry.updatedAt || entry.createdAt;
+						const d = at ? new Date(at) : null;
+						const when =
+							d && !Number.isNaN(d.getTime())
+								? d.toLocaleString(undefined, {
+										year: 'numeric',
+										month: 'short',
+										day: 'numeric',
+										hour: 'numeric',
+										minute: '2-digit',
+									})
+								: '—';
+						const label =
+							entry.outcome === 'Failed' ? 'Failed' : 'Completed';
+						const who = formatShortName(entry.displayName);
+						return (
+							<div key={entry.userId} className='task-view-field'>
+								<span className='task-view-field-label'>
+									{entry.outcome === 'Failed'
+										? 'Failed reason'
+										: 'Completed notes'}
+								</span>
+								<span className='task-view-field-value'>
+									{entry.notes?.trim() || '—'}
+								</span>
+								<span className='task-view-completion-meta'>
+									{label} at {when} by {who}
+								</span>
+							</div>
+						);
+					})
+				: task.status === 'Failed'
+					? (
+							<Field label='Failed reason' value={task.failedReason ?? ''} />
+						)
+					: task.status === 'Completed' || task.completedNotes
+						? (
+								<Field
+									label='Completed notes'
+									value={task.completedNotes ?? ''}
+								/>
+							)
+						: task.failedReason
+							? (
+									<Field label='Failed reason' value={task.failedReason} />
+								)
+							: null}
+
 			{task.description ? (
 				<p className='task-view-description'>{task.description}</p>
 			) : null}
@@ -329,7 +574,7 @@ export function TaskViewPage() {
 	const goBack = () => {
 		// First load / deep link has no in-app history to pop.
 		if (location.key === 'default') {
-			navigate('/tasks');
+			navigate('/my-tasks');
 			return;
 		}
 		navigate(-1);
@@ -384,6 +629,9 @@ export function TaskViewPage() {
 						...prev,
 						status: updated.status,
 						completedAt: updated.completedAt,
+						completedNotes: updated.completedNotes,
+						failedReason: updated.failedReason,
+						completionNotes: updated.completionNotes ?? prev.completionNotes,
 						crewMembers: prev.crewMembers.map((m) =>
 							m.id === user.id
 								? {
@@ -393,7 +641,11 @@ export function TaskViewPage() {
 												? event.recordedAt
 												: m.startedAt,
 										endedAt:
-											eventType === 'ended' ? event.recordedAt : m.endedAt,
+											eventType === 'started'
+												? null
+												: eventType === 'ended'
+													? event.recordedAt
+													: m.endedAt,
 									}
 								: m,
 						),
@@ -441,6 +693,10 @@ export function TaskViewPage() {
 					task={task}
 					userId={user?.id ?? null}
 					onCrewEvent={handleCrewEvent}
+					onEndTask={() => navigate(`/task/${task.id}/complete`)}
+					onAttachmentsChange={(attachments) =>
+						setTask((prev) => (prev ? { ...prev, attachments } : prev))
+					}
 				/>
 			) : null}
 		</Box>

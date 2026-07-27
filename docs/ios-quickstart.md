@@ -190,4 +190,4 @@ npm run s3:cors
 | Signing error on device | Xcode → Signing & Capabilities → choose your Team |
 | Stale live-reload URL | `npm run cap:sync` clears it and restores bundled `dist/` |
 
-App ID: `app.field.mobile`. QR activation is not implemented yet — the shell loads the same web UI as the browser.
+App ID: `app.field.mobile`. Mobile activation: issue a QR from the desktop **Users** page, then on device open **More → Scan activation QR**.

@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Group, Loader, Title, Box } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Plus } from 'lucide-react';
-import type {
-	ColDef,
-	RowClickedEvent,
-	ValueFormatterParams,
-} from 'ag-grid-community';
+import type { RowClickedEvent } from 'ag-grid-community';
 import { AllCommunityModule } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
 import {
@@ -21,42 +17,14 @@ import {
 	type NewAddressFormValues,
 } from '../components/NewAddressModal';
 import { AddressDetailModal } from '../components/AddressDetailModal';
-
-const emptyDash = (p: ValueFormatterParams<Address, string>) =>
-	p.value?.trim() ? p.value : '—';
-
-const columnDefs: ColDef<Address>[] = [
-	{
-		field: 'addressName',
-		headerName: 'Name',
-		valueFormatter: emptyDash,
-		minWidth: 100,
-		flex: 1.2,
-	},
-	{
-		field: 'streetLine',
-		headerName: 'Street',
-		minWidth: 120,
-		flex: 1.4,
-	},
-	{
-		field: 'building',
-		headerName: 'Building',
-		valueFormatter: emptyDash,
-		minWidth: 80,
-		flex: 0.8,
-	},
-	{
-		field: 'notes',
-		headerName: 'Notes',
-		valueFormatter: emptyDash,
-		minWidth: 100,
-		flex: 1.2,
-	},
-];
+import {
+	AG_GRID_MOBILE_MQ,
+	addressColumnDefs,
+	getDefaultColDef,
+} from '../agGridDefaults';
 
 export function AddressesPage() {
-	const isMobile = useMediaQuery('(max-width: 47.9975em)');
+	const isMobile = useMediaQuery(AG_GRID_MOBILE_MQ);
 	const [newAddressOpen, setNewAddressOpen] = useState(false);
 	const [editingAddress, setEditingAddress] = useState<Address | null>(null);
 	const [detailAddressId, setDetailAddressId] = useState<number | null>(null);
@@ -64,14 +32,7 @@ export function AddressesPage() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
-	const defaultColDef = useMemo<ColDef<Address>>(
-		() => ({
-			sortable: true,
-			filter: true,
-			resizable: true,
-		}),
-		[],
-	);
+	const defaultColDef = useMemo(() => getDefaultColDef(isMobile), [isMobile]);
 
 	const refreshAddresses = useCallback(async (signal?: AbortSignal) => {
 		setLoading(true);
@@ -176,7 +137,7 @@ export function AddressesPage() {
 					<AgGridProvider modules={[AllCommunityModule]}>
 						<AgGridReact<Address>
 							rowData={addresses}
-							columnDefs={columnDefs}
+							columnDefs={addressColumnDefs}
 							defaultColDef={defaultColDef}
 							getRowId={(p) => String(p.data.id)}
 							rowHeight={isMobile ? 40 : undefined}

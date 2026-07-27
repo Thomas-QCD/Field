@@ -73,6 +73,109 @@ function asOptionalDateTime(value) {
 }
 
 /**
+ * Upsert one user's completion/failed notes for a task.
+ * @param {import('pg').PoolClient} client
+ * @param {number} taskId
+ * @param {string} userId
+ * @param {'Completed' | 'Failed'} outcome
+ * @param {string | null} notes
+ */
+async function upsertCompletionNote(client, taskId, userId, outcome, notes) {
+  await client.query(
+    `INSERT INTO task_completion_notes (task_id, user_id, outcome, notes)
+     VALUES ($1, $2::uuid, $3, $4)
+     ON CONFLICT (task_id, user_id) DO UPDATE
+       SET outcome = EXCLUDED.outcome,
+           notes = EXCLUDED.notes,
+           updated_at = NOW()`,
+    [taskId, userId, outcome, notes],
+  );
+}
+
+/**
+ * Rebuild tasks.completed_notes / failed_reason from per-user rows (legacy/PDF).
+ * @param {import('pg').PoolClient} client
+ * @param {number} taskId
+ */
+async function refreshTaskNoteAggregates(client, taskId) {
+  const { rows } = await client.query(
+    `SELECT n.outcome, n.notes, u.display_name
+     FROM task_completion_notes n
+     JOIN users u ON u.id = n.user_id
+     WHERE n.task_id = $1
+     ORDER BY n.created_at ASC, n.id ASC`,
+    [taskId],
+  );
+
+  /** @type {string[]} */
+  const completedParts = [];
+  /** @type {string[]} */
+  const failedParts = [];
+  for (const row of rows) {
+    const text = asString(row.notes);
+    if (!text) continue;
+    const line = `${row.display_name}: ${text}`;
+    if (row.outcome === "Failed") failedParts.push(line);
+    else completedParts.push(line);
+  }
+
+  const { rows: updated } = await client.query(
+    `UPDATE tasks
+     SET completed_notes = $2,
+         failed_reason = $3,
+         completion_notes_by_user_id = (
+           SELECT user_id
+           FROM task_completion_notes
+           WHERE task_id = $1
+           ORDER BY updated_at DESC, id DESC
+           LIMIT 1
+         ),
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING completed_notes, failed_reason`,
+    [
+      taskId,
+      completedParts.length > 0 ? completedParts.join("\n\n") : null,
+      failedParts.length > 0 ? failedParts.join("\n\n") : null,
+    ],
+  );
+
+  return {
+    completedNotes: updated[0]?.completed_notes ?? null,
+    failedReason: updated[0]?.failed_reason ?? null,
+  };
+}
+
+/**
+ * @param {import('pg').PoolClient | import('pg').Pool} db
+ * @param {number} taskId
+ */
+async function listCompletionNotes(db, taskId) {
+  const { rows } = await db.query(
+    `SELECT
+       n.user_id,
+       u.display_name,
+       n.outcome,
+       n.notes,
+       n.created_at,
+       n.updated_at
+     FROM task_completion_notes n
+     JOIN users u ON u.id = n.user_id
+     WHERE n.task_id = $1
+     ORDER BY n.created_at ASC, n.id ASC`,
+    [taskId],
+  );
+  return rows.map((row) => ({
+    userId: String(row.user_id),
+    displayName: row.display_name ?? "",
+    outcome: row.outcome,
+    notes: row.notes ?? null,
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  }));
+}
+
+/**
  * @param {unknown} value
  * @returns {number[]}
  */
@@ -597,20 +700,27 @@ export async function updateTask(taskId, body) {
 const STATUS_TRANSITIONS = {
   Created: ["Unassigned", "Assigned"],
   Unassigned: ["Assigned"],
-  Assigned: ["Loaded", "Arrived", "Failed"],
-  Loaded: ["Arrived", "Failed"],
-  Arrived: ["Completed", "Failed"],
-  Completed: [],
+  Assigned: ["Loaded", "In Progress", "Failed"],
+  Loaded: ["In Progress", "Failed"],
+  "In Progress": ["Completed", "Failed", "Undetermined"],
+  Completed: ["In Progress"],
   Failed: [],
+  Undetermined: [],
   Cancelled: [],
 };
 
-const TERMINAL_STATUSES = new Set(["Completed", "Failed", "Cancelled"]);
+const TERMINAL_STATUSES = new Set([
+  "Completed",
+  "Failed",
+  "Undetermined",
+  "Cancelled",
+]);
 
 /**
  * Log a per-crew start/end event and derive task status:
- * - First Start → Arrived (unless already Arrived / terminal)
- * - All starters have Ended → Completed + completed_at
+ * - First Start → In Progress (unless already In Progress / terminal)
+ * - Start on Completed → reopen to In Progress (clears that user's end + note)
+ * - All starters have Ended → Completed | Failed | Undetermined from per-user outcomes
  *
  * @param {number} taskId
  * @param {Record<string, unknown>} body
@@ -655,6 +765,21 @@ export async function createCrewEvent(taskId, body) {
     });
   }
 
+  /** @type {'Completed' | 'Failed'} */
+  let outcome = "Completed";
+  let notes = "";
+  if (eventType === "ended") {
+    const rawOutcome = asString(body.outcome);
+    if (rawOutcome && rawOutcome !== "Completed" && rawOutcome !== "Failed") {
+      throw Object.assign(
+        new Error(`Invalid outcome: ${rawOutcome}`),
+        { status: 400 },
+      );
+    }
+    outcome = rawOutcome === "Failed" ? "Failed" : "Completed";
+    notes = asString(body.notes);
+  }
+
   const pool = getPool();
   const client = await pool.connect();
 
@@ -662,7 +787,7 @@ export async function createCrewEvent(taskId, body) {
     await client.query("BEGIN");
 
     const existing = await client.query(
-      `SELECT id, status, completed_at
+      `SELECT id, status, completed_at, completed_notes, failed_reason
        FROM tasks
        WHERE id = $1 AND deleted_at IS NULL
        FOR UPDATE`,
@@ -673,16 +798,14 @@ export async function createCrewEvent(taskId, body) {
     }
 
     const fromStatus = existing.rows[0].status;
-    if (TERMINAL_STATUSES.has(fromStatus) && fromStatus !== "Completed") {
+    const reopeningCompleted =
+      fromStatus === "Completed" && eventType === "started";
+
+    if (TERMINAL_STATUSES.has(fromStatus) && !reopeningCompleted) {
       throw Object.assign(
         new Error(`Cannot log crew event on ${fromStatus} task`),
         { status: 409 },
       );
-    }
-    if (fromStatus === "Completed" && eventType === "started") {
-      throw Object.assign(new Error("Cannot start a Completed task"), {
-        status: 409,
-      });
     }
 
     const assigned = await client.query(
@@ -694,6 +817,26 @@ export async function createCrewEvent(taskId, body) {
         new Error("User is not assigned to this task"),
         { status: 403 },
       );
+    }
+
+    let completedNotes = existing.rows[0].completed_notes ?? null;
+    let failedReason = existing.rows[0].failed_reason ?? null;
+
+    if (reopeningCompleted) {
+      // Clear this user's prior end so they can work and end again.
+      await client.query(
+        `DELETE FROM task_crew_events
+         WHERE task_id = $1 AND user_id = $2 AND event_type = 'ended'`,
+        [taskId, userId],
+      );
+      await client.query(
+        `DELETE FROM task_completion_notes
+         WHERE task_id = $1 AND user_id = $2::uuid`,
+        [taskId, userId],
+      );
+      const aggregates = await refreshTaskNoteAggregates(client, taskId);
+      completedNotes = aggregates.completedNotes;
+      failedReason = aggregates.failedReason;
     }
 
     if (eventType === "ended") {
@@ -711,39 +854,73 @@ export async function createCrewEvent(taskId, body) {
     }
 
     let eventRow;
-    try {
-      const inserted = await client.query(
-        `INSERT INTO task_crew_events (
-           task_id, user_id, event_type,
-           latitude, longitude, accuracy_meters, recorded_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
-         RETURNING
-           id, task_id, user_id, event_type,
-           latitude, longitude, accuracy_meters,
-           recorded_at, created_at`,
-        [
-          taskId,
-          userId,
-          eventType,
-          latitude,
-          longitude,
-          accuracyMeters,
-          recordedAt,
-        ],
+    if (reopeningCompleted) {
+      const priorStarted = await client.query(
+        `SELECT id
+         FROM task_crew_events
+         WHERE task_id = $1 AND user_id = $2 AND event_type = 'started'`,
+        [taskId, userId],
       );
-      eventRow = inserted.rows[0];
-    } catch (err) {
-      if (err && typeof err === "object" && "code" in err && err.code === "23505") {
-        throw Object.assign(
-          new Error(
-            eventType === "started"
-              ? "Already started this task"
-              : "Already ended this task",
-          ),
-          { status: 409 },
+      if (priorStarted.rowCount > 0) {
+        const updated = await client.query(
+          `UPDATE task_crew_events
+           SET latitude = $3,
+               longitude = $4,
+               accuracy_meters = $5,
+               recorded_at = $6::timestamptz
+           WHERE task_id = $1 AND user_id = $2 AND event_type = 'started'
+           RETURNING
+             id, task_id, user_id, event_type,
+             latitude, longitude, accuracy_meters,
+             recorded_at, created_at`,
+          [
+            taskId,
+            userId,
+            latitude,
+            longitude,
+            accuracyMeters,
+            recordedAt,
+          ],
         );
+        eventRow = updated.rows[0];
       }
-      throw err;
+    }
+
+    if (!eventRow) {
+      try {
+        const inserted = await client.query(
+          `INSERT INTO task_crew_events (
+             task_id, user_id, event_type,
+             latitude, longitude, accuracy_meters, recorded_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
+           RETURNING
+             id, task_id, user_id, event_type,
+             latitude, longitude, accuracy_meters,
+             recorded_at, created_at`,
+          [
+            taskId,
+            userId,
+            eventType,
+            latitude,
+            longitude,
+            accuracyMeters,
+            recordedAt,
+          ],
+        );
+        eventRow = inserted.rows[0];
+      } catch (err) {
+        if (err && typeof err === "object" && "code" in err && err.code === "23505") {
+          throw Object.assign(
+            new Error(
+              eventType === "started"
+                ? "Already started this task"
+                : "Already ended this task",
+            ),
+            { status: 409 },
+          );
+        }
+        throw err;
+      }
     }
 
     let nextStatus = fromStatus;
@@ -752,20 +929,38 @@ export async function createCrewEvent(taskId, body) {
       : null;
 
     if (eventType === "started") {
-      if (
-        fromStatus !== "Arrived" &&
-        !TERMINAL_STATUSES.has(fromStatus)
-      ) {
-        nextStatus = "Arrived";
+      if (reopeningCompleted) {
+        nextStatus = "In Progress";
+        completedAt = null;
         await client.query(
           `UPDATE tasks
-           SET status = 'Arrived'::task_status,
+           SET status = 'In Progress'::task_status,
+               completed_at = NULL,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [taskId],
+        );
+      } else if (
+        fromStatus !== "In Progress" &&
+        !TERMINAL_STATUSES.has(fromStatus)
+      ) {
+        nextStatus = "In Progress";
+        await client.query(
+          `UPDATE tasks
+           SET status = 'In Progress'::task_status,
                updated_at = NOW()
            WHERE id = $1`,
           [taskId],
         );
       }
     } else {
+      // Per-user end outcome — does not terminalize the task until all starters have ended.
+      const notesValue = notes.length > 0 ? notes : null;
+      await upsertCompletionNote(client, taskId, userId, outcome, notesValue);
+      const aggregates = await refreshTaskNoteAggregates(client, taskId);
+      completedNotes = aggregates.completedNotes;
+      failedReason = aggregates.failedReason;
+
       const counts = await client.query(
         `SELECT
            COUNT(*) FILTER (WHERE event_type = 'started')::int AS started_count,
@@ -779,25 +974,45 @@ export async function createCrewEvent(taskId, body) {
       if (
         startedCount > 0 &&
         startedCount === endedCount &&
-        fromStatus !== "Completed" &&
-        fromStatus !== "Failed" &&
-        fromStatus !== "Cancelled"
+        !TERMINAL_STATUSES.has(fromStatus)
       ) {
+        const outcomeRows = await client.query(
+          `SELECT n.outcome
+           FROM task_crew_events e
+           LEFT JOIN task_completion_notes n
+             ON n.task_id = e.task_id AND n.user_id = e.user_id
+           WHERE e.task_id = $1 AND e.event_type = 'ended'`,
+          [taskId],
+        );
+        let hasFailed = false;
+        let hasCompleted = false;
+        for (const row of outcomeRows.rows) {
+          if (row.outcome === "Failed") hasFailed = true;
+          else hasCompleted = true; // null / Completed → treat as Completed
+        }
+
+        /** @type {'Completed' | 'Failed' | 'Undetermined'} */
+        let resolved = "Completed";
+        if (hasFailed && hasCompleted) resolved = "Undetermined";
+        else if (hasFailed) resolved = "Failed";
+
         const updated = await client.query(
           `UPDATE tasks
-           SET status = 'Completed'::task_status,
+           SET status = $2::task_status,
                completed_at = COALESCE(completed_at, NOW()),
                updated_at = NOW()
            WHERE id = $1
            RETURNING completed_at`,
-          [taskId],
+          [taskId, resolved],
         );
-        nextStatus = "Completed";
+        nextStatus = resolved;
         completedAt = new Date(updated.rows[0].completed_at).toISOString();
       }
     }
 
     await client.query("COMMIT");
+
+    const completionNotes = await listCompletionNotes(getPool(), taskId);
 
     return {
       event: {
@@ -820,6 +1035,9 @@ export async function createCrewEvent(taskId, body) {
         id: taskId,
         status: nextStatus,
         completedAt,
+        completedNotes,
+        failedReason,
+        completionNotes,
       },
     };
   } catch (err) {
@@ -853,6 +1071,11 @@ export async function updateTaskStatus(taskId, body) {
     });
   }
 
+  const notesProvided = Object.prototype.hasOwnProperty.call(body, "notes");
+  const notes = notesProvided ? asString(body.notes) : null;
+  const notesValue = notes != null && notes.length > 0 ? notes : null;
+  const authorUserId = asString(body.userId) || null;
+
   const pool = getPool();
   const client = await pool.connect();
 
@@ -860,7 +1083,7 @@ export async function updateTaskStatus(taskId, body) {
     await client.query("BEGIN");
 
     const existing = await client.query(
-      `SELECT id, status
+      `SELECT id, status, completed_at, completed_notes, failed_reason
        FROM tasks
        WHERE id = $1 AND deleted_at IS NULL
        FOR UPDATE`,
@@ -871,9 +1094,43 @@ export async function updateTaskStatus(taskId, body) {
     }
 
     const fromStatus = existing.rows[0].status;
+    let completedNotes = existing.rows[0].completed_notes ?? null;
+    let failedReason = existing.rows[0].failed_reason ?? null;
+    let completedAt = existing.rows[0].completed_at
+      ? new Date(existing.rows[0].completed_at).toISOString()
+      : null;
+
     if (fromStatus === status) {
+      if (
+        notesProvided &&
+        (status === "Completed" || status === "Failed") &&
+        authorUserId
+      ) {
+        await upsertCompletionNote(
+          client,
+          taskId,
+          authorUserId,
+          status,
+          notesValue,
+        );
+        const aggregates = await refreshTaskNoteAggregates(client, taskId);
+        completedNotes = aggregates.completedNotes;
+        failedReason = aggregates.failedReason;
+      }
       await client.query("COMMIT");
-      return { id: taskId, status: fromStatus };
+      const completionNotes = await listCompletionNotes(pool, taskId);
+      return {
+        id: taskId,
+        status: fromStatus,
+        completedAt,
+        completedNotes,
+        failedReason,
+        completionNotes,
+        completionNotesByName:
+          completionNotes.length > 0
+            ? completionNotes.map((n) => n.displayName).join(", ")
+            : null,
+      };
     }
 
     const allowed = STATUS_TRANSITIONS[fromStatus] ?? [];
@@ -884,24 +1141,82 @@ export async function updateTaskStatus(taskId, body) {
       );
     }
 
-    const { rows } = await client.query(
-      `UPDATE tasks
-       SET status = $2::task_status,
-           completed_at = CASE
-             WHEN $2::task_status = 'Completed' THEN COALESCE(completed_at, NOW())
-             ELSE completed_at
-           END,
-           updated_at = NOW()
-       WHERE id = $1
-       RETURNING id, status`,
-      [taskId, status],
-    );
+    if (
+      notesProvided &&
+      (status === "Completed" || status === "Failed") &&
+      authorUserId
+    ) {
+      await upsertCompletionNote(
+        client,
+        taskId,
+        authorUserId,
+        status,
+        notesValue,
+      );
+      const aggregates = await refreshTaskNoteAggregates(client, taskId);
+      completedNotes = aggregates.completedNotes;
+      failedReason = aggregates.failedReason;
+    }
+
+    let rows;
+    if (status === "Completed") {
+      ({ rows } = await client.query(
+        `UPDATE tasks
+         SET status = 'Completed'::task_status,
+             completed_at = COALESCE(completed_at, NOW()),
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING id, status, completed_at, completed_notes, failed_reason`,
+        [taskId],
+      ));
+    } else if (status === "Failed" || status === "Undetermined") {
+      ({ rows } = await client.query(
+        `UPDATE tasks
+         SET status = $2::task_status,
+             completed_at = COALESCE(completed_at, NOW()),
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING id, status, completed_at, completed_notes, failed_reason`,
+        [taskId, status],
+      ));
+    } else if (status === "In Progress") {
+      ({ rows } = await client.query(
+        `UPDATE tasks
+         SET status = 'In Progress'::task_status,
+             completed_at = NULL,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING id, status, completed_at, completed_notes, failed_reason`,
+        [taskId],
+      ));
+    } else {
+      ({ rows } = await client.query(
+        `UPDATE tasks
+         SET status = $2::task_status,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING id, status, completed_at, completed_notes, failed_reason`,
+        [taskId, status],
+      ));
+    }
 
     await client.query("COMMIT");
+
+    const completionNotes = await listCompletionNotes(pool, taskId);
 
     return {
       id: Number(rows[0].id),
       status: rows[0].status,
+      completedAt: rows[0].completed_at
+        ? new Date(rows[0].completed_at).toISOString()
+        : null,
+      completedNotes: rows[0].completed_notes ?? completedNotes,
+      failedReason: rows[0].failed_reason ?? failedReason,
+      completionNotes,
+      completionNotesByName:
+        completionNotes.length > 0
+          ? completionNotes.map((n) => n.displayName).join(", ")
+          : null,
     };
   } catch (err) {
     try {
@@ -914,3 +1229,5 @@ export async function updateTaskStatus(taskId, body) {
     client.release();
   }
 }
+
+export { listCompletionNotes };

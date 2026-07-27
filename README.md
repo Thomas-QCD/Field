@@ -11,6 +11,16 @@ Starts the Vite app (http://localhost:5173) and a local API (http://localhost:30
 
 Use `npm run dev:web` or `npm run dev:api` to run either process alone.
 
+### Testing
+
+```bash
+npm test           # run once (CI-friendly)
+npm run test:watch # watch mode while developing
+npm run test:coverage
+```
+
+Vitest + Testing Library. Put tests under `tests/` as `*.test.ts` / `*.test.tsx`.
+
 ### Database schema (RDS)
 
 ```bash
@@ -19,13 +29,17 @@ npm run db:schema
 
 Applies [`db/migrations/001_initial_schema.sql`](db/migrations/001_initial_schema.sql) to `field-dev` (empty tables, no seed data). Connection details in [`.env.example`](.env.example).
 
-### Delivery docket PDF (local)
+### Delivery docket PDF
+
+From a task in the UI: **More actions → Print delivery docket** (`GET /api/tasks/:id/delivery-docket`).
+
+Fixture-only CLI:
 
 ```bash
 npm run pdf:docket
 ```
 
-Writes `storage/documents/delivery-docket-{taskId}.pdf` from `scripts/fixtures/sample-completed-task.json`. Layout notes: [`docs/pdf-delivery-docket.md`](docs/pdf-delivery-docket.md).
+Writes `storage/documents/delivery-docket-{taskId}.pdf` and upserts `task_documents`. Layout: [`docs/pdf-delivery-docket.md`](docs/pdf-delivery-docket.md).
 
 ### Mobile (Capacitor)
 

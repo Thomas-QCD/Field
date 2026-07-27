@@ -6,6 +6,188 @@
 	height: 100%;
 }
 
+/* Desktop task detail modal: details left, attachments right */
+.task-detail-modal,
+.task-form-modal {
+	width: min(1200px, calc(100vw - 2rem));
+}
+
+.task-detail-modal-body {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.task-detail-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-x: hidden;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding-bottom: var(--mantine-spacing-md);
+}
+
+.task-detail-footer {
+	flex-shrink: 0;
+	margin-inline: calc(-1 * var(--modal-padding, var(--mantine-spacing-md)));
+	padding: var(--mantine-spacing-sm) var(--modal-padding, var(--mantine-spacing-md))
+		var(--mantine-spacing-md);
+	border-top: 1px solid var(--mantine-color-default-border);
+	background: var(--mantine-color-body);
+}
+
+.task-detail-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(280px, 36%);
+	gap: 1.5rem;
+	align-items: stretch;
+}
+
+.task-detail-main {
+	min-width: 0;
+	--task-detail-key-width: 10.5rem;
+}
+
+.task-detail-fields {
+	display: grid;
+	grid-template-columns: var(--task-detail-key-width) minmax(0, 1fr);
+	column-gap: 1.25rem;
+	row-gap: 0.55rem;
+	align-items: baseline;
+	margin: 0;
+}
+
+.task-detail-field-key {
+	margin: 0;
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	color: var(--mantine-color-dimmed);
+	line-height: 1.4;
+}
+
+.task-detail-field-value {
+	margin: 0;
+	font-size: 0.875rem;
+	line-height: 1.4;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+	min-width: 0;
+}
+
+.task-detail-contact-name {
+	display: block;
+	font-weight: 600;
+}
+
+.task-detail-contact-title {
+	display: block;
+	margin-top: 0.1rem;
+	font-size: 0.85em;
+	color: var(--mantine-color-dimmed);
+}
+
+.task-detail-contact-meta {
+	display: block;
+	margin-top: 0.15rem;
+}
+
+/*
+ * height:0 + min-height:100% keeps this column from contributing to row
+ * height (so previews don't stretch the modal). It then fills the left
+ * column's height; only the preview list scrolls — Add attachment stays put.
+ */
+.task-detail-attachments {
+	min-width: 0;
+	height: 0;
+	min-height: 100%;
+	max-height: calc(
+		100dvh -
+			max(
+				5dvh,
+				calc(var(--field-shell-header, 0px) + var(--field-modal-gap, 8px)),
+				env(safe-area-inset-top, 0px)
+			) -
+			max(
+				5dvh,
+				calc(var(--field-shell-footer, 0px) + var(--field-modal-gap, 8px))
+			) -
+			8rem
+	);
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.task-detail-attachments-section {
+	flex: 1;
+	min-height: 0;
+}
+
+.task-detail-attachments-section > :last-child {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.task-detail-attachments .task-view-attachments {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	margin-top: 0;
+	padding-top: 0;
+	border-top: none;
+}
+
+.task-detail-attachments .task-attachments--preview {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.task-detail-attachments .task-attachments-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-x: hidden;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.task-detail-attachments .task-attachments-footer {
+	flex-shrink: 0;
+}
+
+.task-detail-attachments .task-attachments-preview-media {
+	max-height: min(28vh, 220px);
+}
+
+.task-detail-attachments .task-attachments-preview-pdf,
+.task-detail-attachments .task-attachments-preview-text {
+	height: min(28vh, 200px);
+}
+
+.task-detail-attachments .task-attachments-preview-pdf.pdf-preview {
+	max-height: min(28vh, 200px);
+}
+
+@media (max-width: 56em) {
+	.task-detail-layout {
+		grid-template-columns: 1fr;
+	}
+
+	.task-detail-attachments {
+		height: auto;
+		min-height: 0;
+		max-height: min(50vh, 24rem);
+	}
+}
+
 .tasks-grid-wrap {
 	flex: 1;
 	min-height: 0;
@@ -103,12 +285,17 @@
 	color: var(--color-status-loaded);
 }
 
-.task-status[data-status='Arrived'] {
-	color: var(--color-status-arrived);
+.task-status[data-status='In Progress'] {
+	color: var(--color-status-in-progress);
 }
 
 .task-status[data-status='Completed'] {
 	color: var(--color-status-completed);
+}
+
+.task-status[data-status='Undetermined'] {
+	color: var(--color-status-undetermined);
+	background: #fff4e6;
 }
 
 .task-status[data-status='Cancelled'] {
@@ -118,6 +305,76 @@
 
 .task-status[data-status='Failed'] {
 	color: var(--color-status-failed);
+}
+
+.tasks-day-chips {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: nowrap;
+	gap: 0.45rem;
+	width: 100%;
+	min-width: 0;
+	margin: -0.25rem 0 0.85rem;
+	padding: 0.15rem 0.1rem 0.35rem;
+	overflow-x: auto;
+	overflow-y: hidden;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: none;
+}
+
+.tasks-day-chips::-webkit-scrollbar {
+	display: none;
+}
+
+.tasks-day-chip {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	box-sizing: border-box;
+	width: 3.25rem;
+	height: 3.25rem;
+	padding: 0.2rem;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+	background: var(--color-surface-raised);
+	color: var(--color-text);
+	font-family: inherit;
+	cursor: pointer;
+	appearance: none;
+}
+
+.tasks-day-chip:active {
+	background: var(--color-accent-subtle);
+}
+
+.tasks-day-chip[data-selected] {
+	border-color: var(--color-accent);
+	background: var(--color-accent-subtle);
+	color: var(--color-accent-dark);
+}
+
+.tasks-day-chip-month {
+	font-size: 0.6rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	line-height: 1;
+	color: var(--color-text-muted);
+}
+
+.tasks-day-chip[data-selected] .tasks-day-chip-month {
+	color: var(--color-accent);
+}
+
+.tasks-day-chip-date {
+	margin-top: 0.15rem;
+	font-size: 1.15rem;
+	font-weight: 700;
+	line-height: 1;
+	text-align: center;
+	letter-spacing: -0.02em;
 }
 
 .tasks-cards-wrap {
@@ -143,9 +400,19 @@
 	font-size: 0.95rem;
 }
 
-.task-card {
-	display: block;
+.task-card-frame {
+	/* Own container so the card can use cqw for a 1:1 max-height cap. */
+	container-type: inline-size;
 	width: 100%;
+}
+
+.task-card {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: 100%;
+	max-height: 100cqw;
 	margin: 0;
 	padding: 0.9rem 1rem;
 	text-align: left;
@@ -157,6 +424,7 @@
 	font: inherit;
 	cursor: pointer;
 	appearance: none;
+	overflow: hidden;
 }
 
 .task-card:active {
@@ -168,6 +436,7 @@
 	align-items: baseline;
 	justify-content: space-between;
 	gap: 0.75rem;
+	flex-shrink: 0;
 	margin-bottom: 0.65rem;
 }
 
@@ -181,6 +450,7 @@
 .task-card-meta {
 	display: flex;
 	flex-direction: column;
+	flex-shrink: 0;
 	gap: 0.35rem;
 }
 
@@ -204,10 +474,42 @@
 	overflow-wrap: anywhere;
 }
 
-.task-card-description {
-	margin: 0.75rem 0 0;
+.task-card-description-wrap {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+	margin-top: 0.75rem;
 	padding-top: 0.75rem;
 	border-top: 1px solid var(--color-border);
+	overflow: hidden;
+}
+
+/* Fade only when the 1:1 height cap clips the description. */
+.task-card--clipped .task-card-description-wrap::after {
+	content: '';
+	position: absolute;
+	inset-inline: 0;
+	bottom: 0;
+	z-index: 1;
+	height: 3.5rem;
+	background: linear-gradient(
+		to bottom,
+		rgb(255 255 255 / 0),
+		var(--color-surface-raised) 100%
+	);
+	pointer-events: none;
+}
+
+.task-card--clipped:active .task-card-description-wrap::after {
+	background: linear-gradient(
+		to bottom,
+		rgb(255 255 255 / 0),
+		var(--color-accent-subtle) 85%
+	);
+}
+
+.task-card-description {
+	margin: 0;
 	font-size: 0.875rem;
 	line-height: 1.45;
 	color: var(--color-text);
@@ -227,6 +529,93 @@
 	height: 100%;
 	overflow-x: hidden;
 	overflow-y: auto;
+}
+
+.complete-task-page {
+	overflow: hidden;
+}
+
+.complete-task-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding-bottom: 1rem;
+}
+
+.complete-task-label {
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--color-text-muted);
+}
+
+.complete-task-notes-input {
+	min-height: 8rem;
+}
+
+.complete-task-footer {
+	flex-shrink: 0;
+	padding-top: 0.75rem;
+	padding-bottom: 0.25rem;
+	border-top: 1px solid var(--color-border);
+	background: var(--color-bg);
+}
+
+.task-detail-completion {
+	padding: 1rem 1.1rem;
+	border: 1px solid var(--color-border);
+	border-left: 4px solid var(--color-accent);
+	border-radius: var(--radius);
+	background: var(--color-accent-subtle);
+}
+
+.task-detail-completion--failed {
+	border-left-color: var(--mantine-color-red-6);
+	background: var(--mantine-color-red-0);
+}
+
+.task-detail-completion-title {
+	margin: 0 0 0.35rem;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--color-text-muted);
+}
+
+.task-detail-completion-notes {
+	margin: 0.5rem 0 0;
+	font-size: 1rem;
+	font-weight: 600;
+	line-height: 1.45;
+	color: var(--color-text);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.task-detail-completion-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.85rem;
+	margin-top: 0.35rem;
+}
+
+.task-detail-completion-entry .task-detail-completion-notes {
+	margin: 0;
+}
+
+.task-detail-completion-entry .task-detail-completion-meta {
+	margin: 0.25rem 0 0;
+}
+
+.task-detail-completion-meta {
+	margin: 0.35rem 0 0;
+	font-size: 0.8rem;
+	color: var(--color-text-muted);
 }
 
 .task-view-header {
@@ -277,6 +666,7 @@
 	gap: 0.5rem;
 	width: 100%;
 	min-width: 0;
+	overflow: visible;
 }
 
 .task-view-action {
@@ -308,6 +698,76 @@
 .task-view-action:disabled {
 	opacity: 0.45;
 	cursor: not-allowed;
+}
+
+.task-view-photo {
+	position: relative;
+	min-width: 0;
+	z-index: 1;
+}
+
+.task-view-photo--open {
+	z-index: 40;
+}
+
+.task-view-photo-popover {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 41;
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: 100%;
+	height: 200%;
+	overflow: hidden;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+	background: var(--color-surface-raised);
+	box-shadow: 0 8px 20px rgb(0 0 0 / 12%);
+	transform-origin: top center;
+	animation: task-view-photo-popover-in 60ms ease-out;
+}
+
+@keyframes task-view-photo-popover-in {
+	from {
+		height: 100%;
+		opacity: 0.96;
+	}
+	to {
+		height: 200%;
+		opacity: 1;
+	}
+}
+
+.task-view-photo-option {
+	display: flex;
+	flex: 1 1 0;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 0;
+	padding: 0.5rem 0.25rem;
+	border: 0;
+	border-bottom: 1px solid var(--color-border);
+	background: transparent;
+	color: var(--color-text);
+	font-family: inherit;
+	font-size: 0.7rem;
+	font-weight: 600;
+	line-height: 1.1;
+	cursor: pointer;
+}
+
+.task-view-photo-option:last-child {
+	border-bottom: 0;
+}
+
+.task-view-photo-option:active {
+	background: var(--color-accent-subtle);
 }
 
 .task-view-address {
@@ -364,6 +824,12 @@
 	line-height: 1.35;
 	color: var(--color-text);
 	overflow-wrap: anywhere;
+}
+
+.task-view-completion-meta {
+	font-size: 0.75rem;
+	line-height: 1.35;
+	color: var(--color-text-muted);
 }
 
 .task-view-contacts {
@@ -436,6 +902,12 @@
 	color: var(--color-accent);
 }
 
+.task-view-contact-title {
+	font-size: 0.8rem;
+	line-height: 1.3;
+	color: var(--color-text-muted);
+}
+
 .task-view-contact-email {
 	font-size: 0.8rem;
 	line-height: 1.3;
@@ -501,6 +973,18 @@
 	min-width: 0;
 }
 
+.task-attachments--preview {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	width: 100%;
+	min-width: 0;
+}
+
+.task-attachments-footer {
+	flex-shrink: 0;
+}
+
 .task-attachments-preview-stack {
 	display: flex;
 	flex-direction: column;
@@ -527,6 +1011,19 @@
 	background: #f3f3f3;
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius);
+}
+
+.task-attachments-preview-video {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	min-height: 10rem;
+	color: var(--mantine-color-dimmed, #666);
+	font-size: 0.85rem;
+	font-weight: 600;
+	pointer-events: none;
 }
 
 .task-attachments-preview-pdf,
@@ -725,6 +1222,45 @@
 	pointer-events: none;
 }
 
+.attachment-viewer-stage-video {
+	touch-action: manipulation;
+	padding: 0.75rem;
+	box-sizing: border-box;
+}
+
+.attachment-viewer-video {
+	max-width: 100%;
+	max-height: 100%;
+	width: auto;
+	height: auto;
+	background: #000;
+}
+
+.attachment-viewer-video-fallback {
+	max-width: 28rem;
+	padding: 1.25rem;
+	text-align: center;
+	color: rgba(255, 255, 255, 0.85);
+	font-size: 0.95rem;
+	line-height: 1.45;
+}
+
+.attachment-viewer-video-fallback p {
+	margin: 0 0 1rem;
+}
+
+.attachment-viewer-video-download {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0.55rem 1rem;
+	border-radius: var(--radius, 0.5rem);
+	background: #fff;
+	color: #111;
+	font-weight: 600;
+	text-decoration: none;
+}
+
 .attachment-viewer-frame {
 	flex: 1;
 	min-height: 0;
@@ -831,4 +1367,272 @@
 .task-attachments-icon-btn--danger:hover:not(:disabled) {
 	background: #fde8e8;
 	color: #b42318;
+}
+
+/* In-app multi-shot camera (Photo → Camera on task view) */
+html.multi-shot-camera-active,
+html.multi-shot-camera-active body {
+	background: transparent !important;
+}
+
+html.multi-shot-camera-active #root.multi-shot-camera-active {
+	background: transparent !important;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.multi-shot-camera {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	display: flex;
+	flex-direction: column;
+	background: #000;
+	color: #f5f5f5;
+	touch-action: none;
+}
+
+.multi-shot-camera--native {
+	background: transparent;
+}
+
+.multi-shot-camera-bar {
+	position: absolute;
+	z-index: 1;
+	background: #000;
+	pointer-events: none;
+}
+
+.multi-shot-camera-video {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	background: #000;
+}
+
+.multi-shot-camera-flash {
+	position: absolute;
+	z-index: 1;
+	background: #fff;
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+.multi-shot-camera-header {
+	position: relative;
+	z-index: 2;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 0.5rem;
+	padding: calc(0.75rem + env(safe-area-inset-top, 0px)) 1rem 0.75rem;
+}
+
+.multi-shot-camera-count {
+	min-width: 0;
+	text-align: center;
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: rgb(255 255 255 / 85%);
+}
+
+.multi-shot-camera-text-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	min-height: 2.5rem;
+	padding: 0.4rem 0.65rem;
+	border: 0;
+	border-radius: var(--radius);
+	background: transparent;
+	color: #fff;
+	font-family: inherit;
+	font-size: 0.95rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.multi-shot-camera-text-btn:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.multi-shot-camera-text-btn--done {
+	color: #b8f0c8;
+}
+
+.multi-shot-camera-error {
+	position: relative;
+	z-index: 2;
+	margin: 0.5rem 1rem 0;
+	padding: 0.65rem 0.85rem;
+	border-radius: var(--radius);
+	background: rgb(180 40 40 / 90%);
+	font-size: 0.85rem;
+	line-height: 1.35;
+}
+
+.multi-shot-camera-fallback {
+	display: inline;
+	margin-left: 0.35rem;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: #fff;
+	font: inherit;
+	font-weight: 700;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.multi-shot-camera-thumbs {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+	z-index: 2;
+	display: flex;
+	gap: 0.5rem;
+	margin: 0;
+	padding: 0 1rem;
+	list-style: none;
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.multi-shot-camera-thumb {
+	position: relative;
+	flex: 0 0 auto;
+	width: 3.5rem;
+	height: 3.5rem;
+	border-radius: 0.35rem;
+	overflow: hidden;
+	border: 2px solid rgb(255 255 255 / 85%);
+	background: #222;
+}
+
+.multi-shot-camera-thumb img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.multi-shot-camera-thumb-remove {
+	position: absolute;
+	top: 0.15rem;
+	right: 0.15rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.25rem;
+	height: 1.25rem;
+	border: 0;
+	border-radius: 999px;
+	background: rgb(0 0 0 / 70%);
+	color: #fff;
+	cursor: pointer;
+}
+
+.multi-shot-camera-footer {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2;
+	display: grid;
+	grid-template-columns: 1fr auto 1fr;
+	align-items: center;
+	padding: 1rem 1rem calc(1.25rem + env(safe-area-inset-bottom, 0px));
+}
+
+.multi-shot-camera-aspect-wrap {
+	position: relative;
+	justify-self: start;
+	z-index: 3;
+}
+
+.multi-shot-camera-aspect {
+	min-width: 3.5rem;
+	min-height: 2.5rem;
+	padding: 0.35rem 0.55rem;
+	border: 1px solid rgb(255 255 255 / 45%);
+	border-radius: var(--radius);
+	background: rgb(0 0 0 / 35%);
+	color: #fff;
+	font-family: inherit;
+	font-size: 0.85rem;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	cursor: pointer;
+}
+
+.multi-shot-camera-aspect-popover {
+	position: absolute;
+	left: 0;
+	bottom: calc(100% + 0.45rem);
+	display: flex;
+	flex-direction: column;
+	min-width: 5.5rem;
+	overflow: hidden;
+	border: 1px solid rgb(255 255 255 / 35%);
+	border-radius: var(--radius);
+	background: rgb(20 20 20 / 92%);
+	box-shadow: 0 8px 20px rgb(0 0 0 / 35%);
+}
+
+.multi-shot-camera-aspect-option {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	min-height: 2.5rem;
+	padding: 0.45rem 0.75rem;
+	border: 0;
+	border-bottom: 1px solid rgb(255 255 255 / 12%);
+	background: transparent;
+	color: #fff;
+	font-family: inherit;
+	font-size: 0.9rem;
+	font-weight: 600;
+	text-align: left;
+	cursor: pointer;
+}
+
+.multi-shot-camera-aspect-option:last-child {
+	border-bottom: 0;
+}
+
+.multi-shot-camera-aspect-option:active,
+.multi-shot-camera-aspect-option--active {
+	background: rgb(255 255 255 / 12%);
+}
+
+.multi-shot-camera-footer-spacer {
+	justify-self: end;
+	width: 3.5rem;
+	height: 2.5rem;
+}
+
+.multi-shot-camera-shutter {
+	width: 4.25rem;
+	height: 4.25rem;
+	border-radius: 999px;
+	border: 4px solid #fff;
+	background: rgb(255 255 255 / 92%);
+	box-shadow: 0 0 0 3px rgb(0 0 0 / 35%);
+	cursor: pointer;
+}
+
+.multi-shot-camera-shutter:active:not(:disabled) {
+	transform: scale(0.94);
+	background: #e8e8e8;
+}
+
+.multi-shot-camera-shutter:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
 }

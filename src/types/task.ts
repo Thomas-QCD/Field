@@ -3,9 +3,10 @@ export type TaskStatus =
   | 'Unassigned'
   | 'Assigned'
   | 'Loaded'
-  | 'Arrived'
+  | 'In Progress'
   | 'Completed'
   | 'Failed'
+  | 'Undetermined'
   | 'Cancelled';
 
 export type TaskType =
@@ -40,12 +41,13 @@ export interface TaskCrewMember {
 export interface TaskContact {
   id: number;
   name: string;
+  title: string;
   phone: string;
   email: string;
   isPoc: boolean;
 }
 
-export type AttachmentKind = 'photo' | 'signature' | 'document';
+export type AttachmentKind = 'photo' | 'signature' | 'document' | 'video';
 
 export interface TaskAttachment {
   id: number;
@@ -59,6 +61,15 @@ export interface TaskAttachment {
   createdAt: string;
   uploadedByUserId: string;
   uploadedByName: string | null;
+}
+
+export interface TaskCompletionNote {
+  userId: string;
+  displayName: string;
+  outcome: 'Completed' | 'Failed';
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TaskDetail {
@@ -82,6 +93,8 @@ export interface TaskDetail {
   completedNotes: string | null;
   completedAt: string | null;
   failedReason: string | null;
+  completionNotes: TaskCompletionNote[];
+  completionNotesByName: string | null;
   createdAt: string;
   updatedAt: string;
   createdByName: string;

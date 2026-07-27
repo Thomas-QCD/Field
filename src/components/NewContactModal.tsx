@@ -1,22 +1,17 @@
 import { useEffect, useState } from 'react';
-import {
-	Stack,
-	Group,
-	TextInput,
-	Button,
-	Alert,
-} from '@mantine/core';
-import { Mail, Phone, Save, UserRound, X, Plus } from 'lucide-react';
+import { Stack, Group, TextInput, Button, Alert } from '@mantine/core';
+import { Mail, Phone, Save, UserRound, Briefcase, X, Plus } from 'lucide-react';
 import { KeyboardAwareModal } from './KeyboardAwareModal';
 
 export interface NewContactFormValues {
 	name: string;
+	title: string;
 	phone: string;
 	email: string;
 }
 
 function createEmptyForm(): NewContactFormValues {
-	return { name: '', phone: '', email: '' };
+	return { name: '', title: '', phone: '', email: '' };
 }
 
 interface NewContactModalProps {
@@ -135,6 +130,15 @@ export function NewContactModal({
 					required
 					disabled={saving}
 					data-autofocus
+				/>
+				<TextInput
+					size={inputSize}
+					label='Title'
+					placeholder='e.g. Manager, Front Desk, etc.'
+					value={form.title}
+					onChange={(e) => update('title', e.currentTarget.value)}
+					leftSection={<Briefcase size={16} />}
+					disabled={saving}
 				/>
 				<TextInput
 					size={inputSize}

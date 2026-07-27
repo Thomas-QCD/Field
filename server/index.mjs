@@ -7,10 +7,31 @@ import {
   getAttachmentDownloadUrl,
   listAttachments,
 } from "./attachments.mjs";
+import {
+  isEntraAuthEnabled,
+  requireWebAuth,
+  upsertUserFromEntra,
+  verifyEntraToken,
+  getBearerToken,
+} from "./auth.mjs";
 import { getPool } from "./db.mjs";
-import { createCrewEvent, createTask, updateTask, updateTaskStatus } from "./createTask.mjs";
+import { createCrewEvent, createTask, updateTask, updateTaskStatus, listCompletionNotes } from "./createTask.mjs";
+import {
+  activateMobileDevice,
+  issueActivationCode,
+  listMobileDevices,
+  revokeAllMobileDevices,
+  revokeMobileDevice,
+} from "./mobileAuth.mjs";
+import { generateAndStoreDeliveryDocket } from "./deliveryDocket.mjs";
 
 const PORT = Number(process.env.API_PORT) || 3000;
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
 /**
  * @param {import('node:http').IncomingMessage} req
@@ -25,9 +46,7 @@ function sendJson(res, body, status = 200) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": buf.length,
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    ...CORS_HEADERS,
   });
   res.end(buf);
 }
@@ -37,11 +56,33 @@ function sendJson(res, body, status = 200) {
  */
 function sendNoContent(res) {
   res.writeHead(204, {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    ...CORS_HEADERS,
   });
   res.end();
+}
+
+/**
+ * @param {import('node:http').ServerResponse} res
+ * @param {Buffer} buf
+ * @param {string} fileName
+ * @param {'inline' | 'attachment'} [disposition]
+ */
+function sendPdf(res, buf, fileName, disposition = "inline") {
+  const safeName = String(fileName).replace(/[^\w.\- ()+]+/g, "_");
+  /** @type {Record<string, string | number>} */
+  const headers = {
+    "Content-Type": "application/pdf",
+    "Content-Length": buf.length,
+    ...CORS_HEADERS,
+  };
+  // Prefer bare `inline` so browsers open the viewer; only attach a filename when downloading.
+  if (disposition === "attachment") {
+    headers["Content-Disposition"] = `attachment; filename="${safeName}"`;
+  } else {
+    headers["Content-Disposition"] = "inline";
+  }
+  res.writeHead(200, headers);
+  res.end(buf);
 }
 
 /**
@@ -69,12 +110,51 @@ function parseUrl(url) {
 }
 
 /**
+ * Resolve acting user for web admin mobile routes.
+ * Entra: from JWT claims. Dev (no Entra): body/query actor id.
+ * @param {import('node:http').IncomingMessage} request
+ * @param {Record<string, unknown>} body
+ * @param {string} [queryActorId]
+ */
+async function resolveActorUserId(request, body, queryActorId) {
+  // @ts-ignore auth attached by requireWebAuth when Entra is on
+  const auth = request.auth;
+  if (auth?.claims) {
+    const user = await upsertUserFromEntra(auth.claims);
+    return user.id;
+  }
+  if (auth && typeof auth.userId === "string" && !auth.deviceSession) {
+    return auth.userId;
+  }
+  if (auth?.deviceSession) {
+    throw Object.assign(
+      new Error("Mobile sessions cannot manage devices"),
+      { status: 403 },
+    );
+  }
+  if (typeof body.actorUserId === "string" && body.actorUserId.trim()) {
+    return body.actorUserId.trim();
+  }
+  if (typeof body.createdByUserId === "string" && body.createdByUserId.trim()) {
+    return body.createdByUserId.trim();
+  }
+  if (typeof body.revokedByUserId === "string" && body.revokedByUserId.trim()) {
+    return body.revokedByUserId.trim();
+  }
+  if (typeof queryActorId === "string" && queryActorId.trim()) {
+    return queryActorId.trim();
+  }
+  return "";
+}
+
+/**
  * @param {import('pg').QueryResultRow} row
  */
 function mapContactRow(row) {
   return {
     id: Number(row.id),
     name: row.name,
+    title: row.title ?? "",
     phone: row.phone ?? "",
     email: row.email ?? "",
   };
@@ -84,6 +164,7 @@ const CONTACT_SELECT = `
   SELECT
     c.id,
     c.name,
+    COALESCE(c.title, '') AS title,
     c.phone,
     COALESCE(c.email, '') AS email
   FROM contacts c
@@ -108,6 +189,7 @@ async function searchContacts(q) {
     `${CONTACT_SELECT}
        AND (
          c.name ILIKE '%' || $1 || '%'
+         OR COALESCE(c.title, '') ILIKE '%' || $1 || '%'
          OR COALESCE(c.email, '') ILIKE '%' || $1 || '%'
          OR COALESCE(c.phone, '') ILIKE '%' || $1 || '%'
        )
@@ -185,6 +267,16 @@ async function createContact(body) {
     });
   }
 
+  const title =
+    body && typeof body === "object" && "title" in body
+      ? String(body.title ?? "").trim() || null
+      : null;
+  if (title && title.length > 255) {
+    throw Object.assign(new Error("title must be 255 characters or fewer"), {
+      status: 400,
+    });
+  }
+
   const phone =
     body && typeof body === "object" && "phone" in body
       ? String(body.phone ?? "").trim() || null
@@ -207,10 +299,10 @@ async function createContact(body) {
 
   const pool = getPool();
   const { rows } = await pool.query(
-    `INSERT INTO contacts (name, phone, email)
-     VALUES ($1, $2, $3)
-     RETURNING id, name, phone, COALESCE(email, '') AS email`,
-    [name, phone, email],
+    `INSERT INTO contacts (name, title, phone, email)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, name, COALESCE(title, '') AS title, phone, COALESCE(email, '') AS email`,
+    [name, title, phone, email],
   );
   return mapContactRow(rows[0]);
 }
@@ -229,6 +321,16 @@ async function updateContact(id, body) {
   }
   if (name.length > 255) {
     throw Object.assign(new Error("name must be 255 characters or fewer"), {
+      status: 400,
+    });
+  }
+
+  const title =
+    body && typeof body === "object" && "title" in body
+      ? String(body.title ?? "").trim() || null
+      : null;
+  if (title && title.length > 255) {
+    throw Object.assign(new Error("title must be 255 characters or fewer"), {
       status: 400,
     });
   }
@@ -257,13 +359,14 @@ async function updateContact(id, body) {
   const { rows } = await pool.query(
     `UPDATE contacts
      SET name = $2,
-         phone = $3,
-         email = $4,
+         title = $3,
+         phone = $4,
+         email = $5,
          updated_at = now()
      WHERE id = $1
        AND deleted_at IS NULL
-     RETURNING id, name, phone, COALESCE(email, '') AS email`,
-    [id, name, phone, email],
+     RETURNING id, name, COALESCE(title, '') AS title, phone, COALESCE(email, '') AS email`,
+    [id, name, title, phone, email],
   );
   if (rows.length === 0) {
     throw Object.assign(new Error("Contact not found"), { status: 404 });
@@ -614,12 +717,14 @@ async function getTask(id) {
        COALESCE(a.building, '') AS destination_building,
        COALESCE(a.notes, '') AS destination_notes,
        cu.display_name AS created_by_name,
+       cnu.display_name AS completion_notes_by_name,
        (
          SELECT coalesce(
            json_agg(
              json_build_object(
                'id', c.id,
                'name', c.name,
+               'title', COALESCE(c.title, ''),
                'phone', COALESCE(c.phone, ''),
                'email', COALESCE(c.email, ''),
                'isPoc', tc.is_poc
@@ -664,6 +769,7 @@ async function getTask(id) {
      FROM tasks t
      LEFT JOIN addresses a ON a.id = t.destination_address_id
      LEFT JOIN users cu ON cu.id = t.created_by_user_id
+     LEFT JOIN users cnu ON cnu.id = t.completion_notes_by_user_id
      WHERE t.id = $1
        AND t.deleted_at IS NULL`,
     [id],
@@ -672,6 +778,7 @@ async function getTask(id) {
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  const completionNotes = await listCompletionNotes(pool, id);
   return {
     id: Number(row.id),
     taskType: row.task_type,
@@ -690,6 +797,7 @@ async function getTask(id) {
       ? row.contacts.map((c) => ({
           id: Number(c.id),
           name: c.name ?? "",
+          title: c.title ?? "",
           phone: c.phone ?? "",
           email: c.email ?? "",
           isPoc: Boolean(c.isPoc),
@@ -711,6 +819,11 @@ async function getTask(id) {
       ? new Date(row.completed_at).toISOString()
       : null,
     failedReason: row.failed_reason ?? null,
+    completionNotes,
+    completionNotesByName:
+      completionNotes.length > 0
+        ? completionNotes.map((n) => n.displayName).join(", ")
+        : row.completion_notes_by_name ?? null,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     createdByName: row.created_by_name ?? "",
@@ -735,6 +848,28 @@ const server = createServer(async (req, res) => {
 
   try {
     const url = parseUrl(req.url ?? "/");
+
+    await requireWebAuth(req, url.pathname);
+
+    if (req.method === "POST" && url.pathname === "/api/auth/session") {
+      if (!isEntraAuthEnabled()) {
+        sendJson(
+          res,
+          { error: "Entra auth is not configured (set AZURE_TENANT_ID and AZURE_CLIENT_ID)" },
+          503,
+        );
+        return;
+      }
+      const token = getBearerToken(req);
+      if (!token) {
+        sendJson(res, { error: "Unauthorized" }, 401);
+        return;
+      }
+      const claims = await verifyEntraToken(token);
+      const user = await upsertUserFromEntra(claims);
+      sendJson(res, { user });
+      return;
+    }
 
     if (req.method === "GET" && url.pathname === "/api/contacts") {
       const q = (url.searchParams.get("q") ?? "").trim();
@@ -812,6 +947,90 @@ const server = createServer(async (req, res) => {
       const role = (url.searchParams.get("role") ?? "").trim() || null;
       const users = await listUsers(role);
       sendJson(res, { users });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/mobile/activate") {
+      const body = await readJsonBody(req);
+      const result = await activateMobileDevice(body ?? {});
+      sendJson(res, {
+        deviceSessionToken: result.deviceSessionToken,
+        userId: result.userId,
+        displayName: result.displayName,
+        role: result.role,
+        deviceId: result.deviceId,
+        activatedAt: result.activatedAt,
+      });
+      return;
+    }
+
+    const mobileActivationMatch = url.pathname.match(
+      /^\/api\/users\/([0-9a-fA-F-]{36})\/mobile-activations$/,
+    );
+    if (req.method === "POST" && mobileActivationMatch) {
+      const body = (await readJsonBody(req)) ?? {};
+      const createdByUserId = await resolveActorUserId(req, body);
+      const result = await issueActivationCode({
+        userId: mobileActivationMatch[1],
+        createdByUserId,
+      });
+      sendJson(
+        res,
+        {
+          id: result.id,
+          code: result.code,
+          expiresAt: result.expiresAt,
+          userId: result.userId,
+          displayName: result.displayName,
+        },
+        201,
+      );
+      return;
+    }
+
+    const mobileDevicesMatch = url.pathname.match(
+      /^\/api\/users\/([0-9a-fA-F-]{36})\/mobile-devices$/,
+    );
+    if (mobileDevicesMatch) {
+      const userId = mobileDevicesMatch[1];
+      if (req.method === "GET") {
+        const actorUserId = await resolveActorUserId(
+          req,
+          {},
+          url.searchParams.get("actorUserId") ?? "",
+        );
+        const devices = await listMobileDevices({
+          userId,
+          actorUserId,
+          includeRevoked: url.searchParams.get("includeRevoked") === "1",
+        });
+        sendJson(res, { devices });
+        return;
+      }
+      if (req.method === "DELETE") {
+        const body = (await readJsonBody(req)) ?? {};
+        const revokedByUserId = await resolveActorUserId(req, body);
+        const result = await revokeAllMobileDevices({
+          userId,
+          revokedByUserId,
+        });
+        sendJson(res, result);
+        return;
+      }
+    }
+
+    const mobileDeviceMatch = url.pathname.match(
+      /^\/api\/users\/([0-9a-fA-F-]{36})\/mobile-devices\/([0-9a-fA-F-]{36})$/,
+    );
+    if (req.method === "DELETE" && mobileDeviceMatch) {
+      const body = (await readJsonBody(req)) ?? {};
+      const revokedByUserId = await resolveActorUserId(req, body);
+      const device = await revokeMobileDevice({
+        userId: mobileDeviceMatch[1],
+        deviceId: mobileDeviceMatch[2],
+        revokedByUserId,
+      });
+      sendJson(res, { device });
       return;
     }
 
@@ -928,6 +1147,36 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    const deliveryDocketMatch = url.pathname.match(
+      /^\/api\/tasks\/(\d+)\/delivery-docket$/,
+    );
+    if (req.method === "GET" && deliveryDocketMatch) {
+      const taskId = Number(deliveryDocketMatch[1]);
+      const task = await getTask(taskId);
+      if (!task) {
+        sendJson(res, { error: "Task not found" }, 404);
+        return;
+      }
+
+      // @ts-ignore auth attached by requireWebAuth when Entra is on
+      const auth = req.auth;
+      let generatedByUserId = null;
+      if (auth?.claims) {
+        const user = await upsertUserFromEntra(auth.claims);
+        generatedByUserId = user.id;
+      } else if (auth && typeof auth.userId === "string" && auth.userId.trim()) {
+        generatedByUserId = auth.userId.trim();
+      }
+
+      const { buffer, fileName } = await generateAndStoreDeliveryDocket(task, {
+        generatedByUserId,
+      });
+      const disposition =
+        url.searchParams.get("download") === "1" ? "attachment" : "inline";
+      sendPdf(res, buffer, fileName, disposition);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/tasks") {
       const body = await readJsonBody(req);
       const task = await createTask(body);
@@ -951,5 +1200,8 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Field API listening on http://localhost:${PORT}`);
+  const authMode = isEntraAuthEnabled()
+    ? "Entra ID JWT required"
+    : "stub (no JWT)";
+  console.log(`Field API listening on http://localhost:${PORT} — auth: ${authMode}`);
 });

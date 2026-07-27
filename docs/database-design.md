@@ -7,13 +7,13 @@ Normalized relational schema for Field, derived from the flat task export in [`t
 **Decisions:**
 
 - **Relational database** — PostgreSQL (local Docker in dev; RDS on AWS in production).
-- **Primary keys** — `bigint` identity for internal entities; `uuid` for users (Cognito `sub` for web-authenticated users).
+- **Primary keys** — `bigint` identity for internal entities; `uuid` for users (Entra `oid` mapped to UUID for web-authenticated users).
 - **Timestamps** — `timestamptz` stored in UTC.
 - **Coordinates** — `numeric` latitude/longitude on `addresses` (destination). Crew start/end geotags live on `task_crew_events` (nullable lat/lng + accuracy). Optional geo on `task_status_events` for status-change audit.
 - **No teams** — company-local workforce; tasks are assigned to individual **crew members** only. Reference `AssignedToTeamId` is ignored. Field does not use the word "driver".
 - **Task type / status** — PostgreSQL enums (`task_type`, `task_status`) stored as text labels on `tasks` (e.g. `Delivery`, `Loaded`). No FK from `tasks` to lookup tables.
 - **No dispatch address** — destination only; `dispatch_address_id` is not modeled.
-- **Contacts vs addresses** — `contacts` are people (name/phone/email). `addresses` are destinations with optional `address_name` (venue label). They are independent.
+- **Contacts vs addresses** — `contacts` are people (name/title/phone/email). `addresses` are destinations with optional `address_name` (venue label). They are independent.
 - **Task assignment** — 0..many contacts via `task_contacts` (same pattern as `task_crew_members`); 0..1 destination via `tasks.destination_address_id`.
 
 ---
@@ -46,9 +46,9 @@ erDiagram
 
 | Group | Tables | Purpose |
 |-------|--------|---------|
-| Identity & access | `users`, `mobile_activation_codes`, `mobile_devices` | Web auth (Cognito); mobile QR activation + device sessions |
+| Identity & access | `users`, `mobile_activation_codes`, `mobile_devices` | Web auth (Entra ID); mobile QR activation + device sessions |
 | Locations | `addresses` | Job-site destinations with optional `address_name`; optional link from tasks |
-| Contacts | `contacts` | People (name, phone, email) — not venues |
+| Contacts | `contacts` | People (name, title, phone, email) — not venues |
 | Task reference data | `task_types`, `task_statuses`, `task_status_transitions` | Optional lookup / workflow metadata (tasks store enums directly) |
 | Core | `tasks`, `task_crew_members`, `task_contacts` | Primary unit of work; crew + contacts + optional destination |
 | Task extensions | `task_attachments`, `task_crew_events`, `task_status_events`, `task_documents`, `email_deliveries` | Photos, crew start/end logs, status audit, PDFs, outbound email log |
@@ -59,7 +59,7 @@ erDiagram
 
 ### `users`
 
-People who create or execute tasks. Web users authenticate via Cognito; `users.id` = Cognito `sub`. Mobile crew members activate via QR (see below); user records still exist for assignment and audit.
+People who create or execute tasks. Web users authenticate via Microsoft Entra ID; `users.id` is derived from Entra `oid`. Mobile crew members activate via QR (see below); user records still exist for assignment and audit. Amazon Cognito is not used.
 
 | Column | Type | Constraints | Maps from reference |
 |--------|------|-------------|---------------------|
@@ -83,7 +83,7 @@ People who create or execute tasks. Web users authenticate via Cognito; `users.i
 
 | Client | User login | Typical actions |
 |--------|------------|-----------------|
-| Web | Yes (Cognito) | Create tasks, assign crew, admin, issue/revoke mobile access |
+| Web | Yes (Entra ID) | Create tasks, assign crew, admin, issue/revoke mobile access |
 | Mobile (Capacitor) | QR activation → device session | View assigned tasks, update status, upload photos |
 
 The `users` table is required for assignment and web auth. Mobile identity comes from a **device session** created at QR activation (not build-time embedding).
@@ -103,7 +103,7 @@ One-time (or short-lived) codes encoded in QR images issued from the web app for
 | `created_at` | `timestamptz` | NOT NULL | — |
 | `revoked_at` | `timestamptz` | nullable | Invalidate unused codes |
 
-**Notes:** Exact payload format (URL vs opaque code) and one-time vs multi-use remain open (see Open Questions). Prefer single-use + expiry for MVP.
+**Notes:** QR payload is plain text `field1.<base64url-32-bytes>` (SHA-256 stored in `code_hash`). Codes are **single-use** with a **24-hour** TTL. Multiple devices per user are allowed.
 
 ### `mobile_devices`
 
@@ -163,6 +163,7 @@ Contacts (people to notify or reference on a task). Assigned to tasks through `t
 |--------|------|-------------|---------------------|
 | `id` | `bigint` | PK | `RecipientId` |
 | `name` | `varchar(255)` | NOT NULL | `RecipientName` |
+| `title` | `varchar(255)` | nullable | Role / relationship (e.g. Electrical manager) — Field-only |
 | `phone` | `varchar(50)` | nullable | `RecipientPhone` |
 | `email` | `varchar(255)` | nullable | `RecipientEmail` (single address) |
 | `deleted_at` | `timestamptz` | nullable | Soft delete — null = active |
@@ -196,7 +197,7 @@ PostgreSQL enum types store the text labels used by the reference export and the
 | `Unassigned` | No crew member yet |
 | `Assigned` | Crew member set |
 | `Loaded` | Example: en route / loaded on truck |
-| `Arrived` | On site |
+| `In Progress` | On site / working |
 | `Completed` | Success terminal |
 | `Failed` | Failure terminal |
 | `Cancelled` | Cancelled in Wodely / voided |
@@ -215,7 +216,8 @@ Live Wodely webhooks (`WOO-message-handler`) and reconciler (`updateModifiedWooT
 
 | Wodely | Field `task_status` |
 |--------|---------------------|
-| `StatusDesc` Unassigned / Assigned / Loaded / Arrived / Completed / Failed | same |
+| `StatusDesc` Unassigned / Assigned / Loaded / Completed / Failed | same |
+| `StatusDesc` `Arrived` / webhook `Driver arrived` | `In Progress` |
 | `StatusDesc` `Transit` | `Loaded` |
 | Webhook `task-cancelled` | `Cancelled` |
 
@@ -273,8 +275,8 @@ Allowed workflow edges. Enforce in application layer (or DB trigger) when status
 created → unassigned | assigned
 unassigned → assigned
 assigned → loaded | failed
-loaded → arrived | failed
-arrived → completed | failed
+loaded → in_progress | failed
+in_progress → completed | failed
 completed → (terminal)
 failed → (terminal)
 ```
@@ -371,7 +373,7 @@ Photos, signatures, and other files. Binary content in S3; metadata here.
 | `id` | `bigint` | PK |
 | `task_id` | `bigint` | FK → `tasks.id`, NOT NULL |
 | `uploaded_by_user_id` | `uuid` | FK → `users.id`, NOT NULL |
-| `kind` | `varchar(50)` | NOT NULL | `photo`, `signature`, `document` |
+| `kind` | `varchar(50)` | NOT NULL | `photo`, `signature`, `document`, `video` |
 | `storage_key` | `varchar(500)` | NOT NULL | S3 object key |
 | `mime_type` | `varchar(100)` | NOT NULL | |
 | `file_name` | `varchar(255)` | nullable | |
@@ -422,7 +424,7 @@ Log of automatic outbound emails. See [`critical-features.md`](critical-features
 
 Append-only per-crew start/end check-in log (one `started` and one `ended` per user per task). Stores when and where each assigned crew member began and finished work. Does **not** replace task status — the service derives status from these events:
 
-- First `started` on the task → `tasks.status = Arrived` (unless already `Arrived` / terminal)
+- First `started` on the task → `tasks.status = In Progress` (unless already `In Progress` / terminal)
 - When every user with a `started` also has an `ended` → `tasks.status = Completed` + `completed_at` (assigned crew who never started do not block)
 
 | Column | Type | Constraints |
@@ -513,7 +515,7 @@ interface TaskReadModel {
   assignedCrew: { id: string; displayName: string }[];
   contactIds: number[];
   pocContactId: number | null;
-  contacts: { id: number; name: string; phone: string; email: string; isPoc: boolean }[];
+  contacts: { id: number; name: string; title: string; phone: string; email: string; isPoc: boolean }[];
   destinationAddressId: number | null;
   destination: {
     streetLine: string;
@@ -571,7 +573,7 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | `task_attachments` | Yes — photo proof on completion |
 | `task_documents` | Yes — PDF label, docket, POD |
 | `email_deliveries` | Yes — automatic email log |
-| `task_crew_events` | Yes — per-crew start/end logs; derives Arrived / Completed |
+| `task_crew_events` | Yes — per-crew start/end logs; derives In Progress / Completed |
 | `task_status_events` | Recommended — status-change audit trail |
 
 ---
@@ -585,7 +587,7 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | Database | PostgreSQL (Docker) or RDS `field-dev` | Amazon RDS for PostgreSQL |
 | File blobs | `./storage/` filesystem | S3 — `task_attachments`, `task_documents` |
 | Email | Console / Mailpit | Amazon SES — `email_deliveries` |
-| Auth | Local dev auth stub | Cognito — web; mobile device sessions via QR |
+| Auth | Local dev auth stub | Entra ID — web; mobile device sessions via QR (not Cognito) |
 
 Use storage and email abstractions so `storage_key` works for both local paths and S3 keys.
 
@@ -596,7 +598,6 @@ Use storage and email abstractions so `storage_key` works for both local paths a
 - Confirm status transition rules with operations
 - PDF generation triggers per document type (label, docket, POD)
 - Email triggers and templates per task event
-- Mobile QR payload format, expiry, one-time vs multi-use
 - One active mobile device per crew member vs multiple devices
 - Address picker: select existing `addresses` by `address_name` vs free-text create on task form (picker + free-text both supported)
 - Unique constraint on `external_key` (per integration source)?

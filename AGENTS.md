@@ -44,7 +44,7 @@ When scoping MVP, include at least one PDF type and one email trigger end-to-end
 | Database (local / cloud-dev) | **PostgreSQL** — Docker/native local, or RDS `field-dev` (see `.env.example`)                          |
 | Database (production target) | **RDS PostgreSQL** — see [`docs/database-design.md`](docs/database-design.md)                          |
 | Backend / API                | **Not decided**                                                                                        |
-| Auth                         | **Web:** Cognito/local login. **Mobile:** QR activation + durable device session (remotely revocable)  |
+| Auth                         | **Web:** Microsoft Entra ID SSO (MSAL) / local stub in dev. **Mobile:** QR activation + durable device session (remotely revocable). **No Cognito.** |
 | MVP scope                    | **Not defined** (task field subset TBD)                                                                |
 | Critical features            | **PDF generation**, **automatic email** — see [`docs/critical-features.md`](docs/critical-features.md) |
 
@@ -56,7 +56,7 @@ Many product details remain open. Treat undecided items as open until documented
 
 Field is built as a **React + TypeScript web application**. This is the lead platform for design and initial delivery.
 
-Design **mobile-responsive UI from the start** — crew members will use the same UI on phones inside the Capacitor shell. The **web app requires login**; the **mobile app** uses **QR activation** (not Cognito login).
+Design **mobile-responsive UI from the start** — crew members will use the same UI on phones inside the Capacitor shell. The **web app requires login**; the **mobile app** uses **QR activation** (not Microsoft SSO).
 
 ### Mobile via Capacitor (decided)
 
@@ -77,7 +77,7 @@ Android and iOS apps are delivered by wrapping the **same built web app** in a n
 **Implications for agents:**
 
 - One UI codebase for web, iOS, and Android — branch behavior on client context (web vs Capacitor), especially for auth gates.
-- **Do not embed `userId` in the mobile build.** Do not use Cognito login on mobile.
+- **Do not embed `userId` in the mobile build.** Do not use Microsoft SSO / Entra login on mobile.
 - Mobile first screen when inactive: **QR scanner / activation**. When active: crew task UI with persisted session.
 - Use Capacitor plugins when native device APIs are needed (camera/barcode for QR, push notifications, filesystem, etc.).
 - Expect occasional mobile-specific tweaks (safe areas, keyboard, native permissions) — not a full rewrite.
@@ -94,16 +94,16 @@ Android and iOS apps are delivered by wrapping the **same built web app** in a n
 
 **Decided:**
 
-- **Web:** Amazon **Cognito** in production; local auth in development.
+- **Web:** Microsoft **Entra ID** SSO (MSAL) in production; local auth stub in development. **Amazon Cognito is not used** (explicitly rejected).
 - **Mobile:** Shared private build ships **deactivated** (no identity baked in).
 - Crew activates by scanning a **valid QR** issued for their user from the web app.
 - After activation, the app keeps a **permanent local session** (feels always signed in to the user).
 - Access can be **pulled remotely** (revoke device/session server-side); subsequent requests are rejected and the app clears local auth and shows activation again.
-- Do not use Cognito hosted UI or password login on the Capacitor build.
+- Do not use Entra/MSAL, password login, or Cognito on the Capacitor build.
 
 **Implementation notes:**
 
-- Detect Capacitor (`Capacitor.isNativePlatform()`). Web uses Cognito/local JWT; mobile uses device session token from QR activation.
+- Detect Capacitor (`Capacitor.isNativePlatform()`). Web uses Entra JWT (or local stub); mobile uses device session token from QR activation.
 - Persist mobile session in secure on-device storage (e.g. Capacitor Preferences / Secure Storage).
 - Mobile API requests send the device session token; API resolves `userId`, scopes to `task_crew_members`, and sets audit fields.
 - Reject revoked or unknown sessions with `401`; client wipes local state and returns to QR activation.
@@ -114,21 +114,21 @@ Android and iOS apps are delivered by wrapping the **same built web app** in a n
 ### Frontend
 
 - **React + TypeScript** for all client UI.
-- **Capacitor** for iOS and Android — private internal distribution; QR activation (not Cognito).
+- **Capacitor** for iOS and Android — private internal distribution; QR activation (not Entra SSO).
 - Capacitor 7 is scaffolded (`android/`, `ios/`). Day-to-day: `npm run cap:live` (WebView → Vite hot reload) with `npm run dev`; bundled: `npm run cap:sync`. QR activation comes later.
 - Structure routing so web-only routes (login, create task, task board) are gated; mobile crew routes require an active device session (or show QR activation when deactivated).
 
 ## Development environment
 
-App, API, and most services run on the developer machine. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-attachments`** are provisioned in account `730335210534`, region `us-west-1`, for cloud-backed local development. Do not provision Cognito, SES, or other AWS resources without user approval.
+App, API, and most services run on the developer machine. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-attachments`** are provisioned in account `730335210534`, region `us-west-1`, for cloud-backed local development. Do not provision SES or other AWS resources without user approval. **Do not provision Cognito** — web auth is Entra ID, not Cognito.
 
-| Concern      | Local (now)                                              | AWS (current / target)                          |
+| Concern      | Local (now)                                              | AWS / identity (current / target)                          |
 | ------------ | -------------------------------------------------------- | ----------------------------------------------- |
 | Database     | PostgreSQL via Docker Compose, or RDS `field-dev`        | **RDS `field-dev`** (us-west-1) — see `.env.example` |
 | API          | `localhost` — Node/other runtime on dev machine          | ECS Fargate, Lambda, etc. (not yet)             |
 | Web app      | Vite dev server                                          | S3 + CloudFront (not yet)                       |
 | File storage | Task attachments via S3 `field-dev-attachments` (presigned URLs); PDF scripts still write `./storage/documents` | S3                                          |
-| Web auth     | Simple local auth (dev users, JWT stub, or session mock) | Amazon Cognito (not yet)                        |
+| Web auth     | Simple local auth (dev users, JWT stub, or session mock) | **Microsoft Entra ID** (MSAL) — not Cognito     |
 | Email        | Log to console, write to file, or Mailpit/Mailhog        | Amazon SES (not yet)                            |
 | PDF output   | Local `./storage/documents`                              | S3 (later)                                      |
 
@@ -154,7 +154,7 @@ Production will run on **AWS**. Do not set this up until the user directs integr
 | Concern            | Common AWS fit                                                                                        |
 | ------------------ | ----------------------------------------------------------------------------------------------------- |
 | API                | API Gateway + Lambda, or ECS/Fargate for a long-running Node API                                      |
-| Auth               | **Amazon Cognito** — web only; mobile uses QR-activated device sessions                               |
+| Auth               | **Microsoft Entra ID** (web only; not Cognito); mobile uses QR-activated device sessions             |
 | File uploads       | S3 with presigned URLs (task photos, attachments)                                                     |
 | Database           | **RDS PostgreSQL** — schema in [`docs/database-design.md`](docs/database-design.md)                   |
 | Static web hosting | S3 + CloudFront                                                                                       |
@@ -166,7 +166,7 @@ Design code for AWS compatibility, but run locally until integration is requeste
 
 ### Backend
 
-API layer is **not yet chosen**. Database is **relational (PostgreSQL)** — local Docker and/or RDS `field-dev`. Web auth: **local stub now**, Cognito when integrated. See [Development environment](#development-environment).
+API layer is **not yet chosen**. Database is **relational (PostgreSQL)** — local Docker and/or RDS `field-dev`. Web auth: **local stub now**, Entra ID SSO when wired. See [Development environment](#development-environment).
 
 ## Guiding Principle: Minimum Viable Product First
 
@@ -225,6 +225,7 @@ There is an existing licensed FWM product that serves as the functional referenc
 - **Contents:** Vite + React + TypeScript web app (Tasks shell); docs under `docs/`.
 - **Docs:** [`docs/sdd.md`](docs/sdd.md) (master design), `AGENTS.md`, `docs/task-model.md`, `docs/database-design.md`, `docs/critical-features.md`, [`docs/pdf-delivery-docket.md`](docs/pdf-delivery-docket.md).
 - **Run locally:** `npm install && npm run dev` → http://localhost:5173 (API on `:3000`)
+- **Tests:** Vitest — `npm test` / `npm run test:watch` (`*.test.ts(x)` under `tests/`)
 - **Stop / restart dev servers:** `npm run dev:stop` frees ports 3000 + 5173; `npm run dev:restart` stops then starts. Prefer these over hunting PIDs.
 - **Agent rule for servers:** Prefer one shared `npm run dev`. Before starting API/Vite, run `npm run dev:stop` (or rely on `npm run dev`, which frees those ports first). Do not leave orphan `node server/index.mjs` / `vite` processes; use `dev:stop` when done verifying.
 - **Mobile (Capacitor):** `npm run cap:live` (hot reload) / `cap:sync` / `cap:android` / `cap:ios` — see [`README.md`](README.md) Mobile section.
@@ -246,13 +247,13 @@ Master design in [`docs/sdd.md`](docs/sdd.md); proceed with MVP vertical slices.
 
 - React + TypeScript + Vite web app exists at repo root (`npm run dev`).
 - App shell: mobile-first hamburger + left sidebar; Tasks / Contacts / Addresses pages.
-- **Capacitor 7** scaffolding present (`android/`, `ios/`, `capacitor.config.ts`) — run `npm run cap:android` / `npm run cap:ios`. QR activation not implemented yet.
+- **Capacitor 7** scaffolding present (`android/`, `ios/`, `capacitor.config.ts`) — run `npm run cap:android` / `npm run cap:ios`. Mobile QR activation: desktop **Users** page issues `field1.` codes; More page scans them into a device session.
 - Follow [`docs/sdd.md`](docs/sdd.md); implement MVP slices vertically.
 - Do not add dependencies, modules, or abstractions without clear MVP justification.
 - Build mobile-responsive web UI; Capacitor native projects are ready for local device/simulator testing.
-- **Web:** authenticated session (local auth in dev; Cognito JWT in production) — auth not wired yet.
+- **Web:** authenticated session (local auth in dev; Entra JWT in production) — auth not wired yet.
 - **Mobile:** deactivated until QR activation; durable device session; remote revoke supported in design (not implemented yet).
-- Do not unify auth across clients — web uses Cognito/session JWT; mobile uses QR-issued device sessions.
+- Do not unify auth across clients — web uses Entra/local JWT; mobile uses QR-issued device sessions. Cognito is not part of the stack.
 - RDS `field-dev` and S3 `field-dev-attachments` exist in us-west-1; do not provision other AWS services without user approval.
 
 ## Open Questions (to resolve with the user)
@@ -265,7 +266,6 @@ These are intentionally unanswered. Do not assume answers:
 - PDF/email triggers: which task events generate which document and send which email?
 - Sample PDF layouts from licensed product (label, docket, POD)?
 - User roles beyond creator and crew (supervisors, admins, read-only)?
-- Mobile QR payload format, one-time vs multi-use codes, and expiry?
 - One active mobile device per crew member vs multiple devices?
 - AWS integration timing — user will specify when to move off local dev
 - AWS backend shape (when integrating): serverless (Lambda) vs containerized (ECS)?
