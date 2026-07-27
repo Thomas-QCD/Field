@@ -182,6 +182,8 @@ npm run s3:cors
 | Symptom | Fix |
 | ------- | --- |
 | `pod install` fails | Install CocoaPods; from `ios/App` run `pod install` |
+| **Sign in failed: BarcodeScanner plugin is not implemented on ios** | Native pods are missing/stale (Windows `cap sync` skips CocoaPods). On the Mac: `cd ios/App && pod install`, then in Xcode Product → Clean Build Folder and Run again. Or from repo root: `npx cap sync ios` (runs `pod install`). |
+| `GoogleMLKit/BarcodeScanning` … required a higher minimum deployment target | Podfile / Xcode must be **iOS 15.5+** (ML Kit 7). Repo is set to `15.5`; pull latest, then `cd ios/App && pod install`. |
 | Blank WebView / can’t reach Vite | Use `npm run cap:live -- ios` (Simulator → `127.0.0.1`), not Android’s `10.0.2.2` |
 | `ENOENT` … `android/.../assets/capacitor.config.json` | Old `cap:live` synced Android too. Use `npm run cap:live -- ios`, or `mkdir -p android/app/src/main/assets` then retry |
 | API errors on device | Set `VITE_API_BASE=http://<mac-lan-ip>:3000` for bundled builds; phone and Mac on same Wi‑Fi |
