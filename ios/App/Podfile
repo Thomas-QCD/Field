@@ -1,6 +1,6 @@
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
 
-# GoogleMLKit/BarcodeScanning 7.0.0 (via @capacitor-mlkit/barcode-scanning) needs ≥ 15.5
+# iOS 15.5+ keeps headroom for native plugins; ML Kit is not linked on iOS.
 platform :ios, '15.5'
 use_frameworks!
 
@@ -13,7 +13,10 @@ def capacitor_pods
   pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
   pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
   pod 'CapacitorCommunityCameraPreview', :path => '../../node_modules/@capacitor-community/camera-preview'
-  pod 'CapacitorMlkitBarcodeScanning', :path => '../../node_modules/@capacitor-mlkit/barcode-scanning'
+  # Google ML Kit is Android-only in Field: it does not support Apple Silicon
+  # simulators, which hides all iPhone destinations in Xcode. Crew QR scan on
+  # iOS uses paste of field1.… (see activateFromQr.ts). Keep the npm package
+  # for Android Gradle.
   pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
   pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
   pod 'CapacitorPreferences', :path => '../../node_modules/@capacitor/preferences'

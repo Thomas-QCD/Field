@@ -190,6 +190,7 @@ npm run s3:cors
 | Tasks/contacts work, but attachments fail with **Could not load credentials from any providers** | Not an iOS misconfig. The Mac API needs AWS credentials to presign S3 URLs (DB can work from `DATABASE_URL` alone). On the Mac: `aws login` (or SSO login for your profile), confirm `aws sts get-caller-identity`, then restart `npm run dev`. |
 | RDS connection refused | Re-login AWS; confirm SG allows this Mac’s public IP; check `DATABASE_URL` |
 | Signing error on device | Xcode → Signing & Capabilities → choose your Team |
+| Destination list only shows **My Mac / Any iOS Device / Any iOS Simulator Device** (no iPhone) | Older builds linked **Google ML Kit** on iOS, which hides Apple Silicon simulator destinations. Current Podfile does **not** include ML Kit on iOS. Pull latest, then `cd ios/App && pod install`, quit Xcode, reopen `App.xcworkspace`, and pick **iPhone 17** (etc.). Sign in by **pasting** the `field1.…` code (QR camera scan is Android-only). |
 | Stale live-reload URL | `npm run cap:sync` clears it and restores bundled `dist/` |
 
-App ID: `app.field.mobile`. Mobile activation: issue a QR from the desktop **Users** page, then on device open **More → Scan activation QR**.
+App ID: `app.field.mobile`. Mobile activation: issue a `field1.…` code from the desktop **Users** page. On **iOS Simulator**, paste it on the sign-in screen. On **Android**, scan or paste.

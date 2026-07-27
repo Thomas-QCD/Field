@@ -8,7 +8,46 @@ import { activateMobile } from '../api/mobile';
 import { apiUrl } from '../api/client';
 import { saveMobileSession } from './mobileSession';
 
-const ACTIVATION_CODE_PATTERN = /^field1\.[A-Za-z0-9_-]+$/;
+export const ACTIVATION_CODE_PATTERN = /^field1\.[A-Za-z0-9_-]+$/;
+
+/** True when the native ML Kit scan UI is available (Android). iOS uses paste — Google ML Kit is not linked on iOS (blocks Apple Silicon simulators). */
+export function canScanActivationQr(): boolean {
+	return (
+		Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+	);
+}
+
+function normalizeActivationInput(raw: string): string {
+	const trimmed = raw.trim();
+	if (!trimmed) {
+		throw new Error('Enter an activation code (field1.…)');
+	}
+	if (!ACTIVATION_CODE_PATTERN.test(trimmed)) {
+		throw new Error('Not a Field activation code (expected field1.…)');
+	}
+	return trimmed;
+}
+
+/** Activate with a pasted/typed `field1.…` code and persist the device session. */
+export async function activateWithCode(
+	rawCode: string,
+): Promise<{ displayName: string }> {
+	const code = normalizeActivationInput(rawCode);
+
+	const result = await activateMobile(code, {
+		deviceLabel: `${Capacitor.getPlatform()} device`,
+	});
+
+	await saveMobileSession({
+		deviceSessionToken: result.deviceSessionToken,
+		userId: result.userId,
+		displayName: result.displayName,
+		role: result.role,
+		apiBaseUrl: apiUrl('/api').replace(/\/api$/, ''),
+	});
+
+	return { displayName: result.displayName };
+}
 
 async function ensureAndroidScannerModule(): Promise<void> {
 	if (Capacitor.getPlatform() !== 'android') return;
@@ -36,16 +75,15 @@ async function ensureAndroidScannerModule(): Promise<void> {
 	});
 }
 
-/** Scan an activation QR and persist the device session. */
+/** Scan an activation QR (Android) and persist the device session. */
 export async function activateFromQrScan(): Promise<{ displayName: string }> {
-	await ensureAndroidScannerModule();
-
-	if (Capacitor.getPlatform() !== 'android') {
-		const { camera } = await BarcodeScanner.requestPermissions();
-		if (camera !== 'granted' && camera !== 'limited') {
-			throw new Error('Camera permission is required to scan a QR code');
-		}
+	if (!canScanActivationQr()) {
+		throw new Error(
+			'Camera QR scan is Android-only here. Paste the field1.… code instead.',
+		);
 	}
+
+	await ensureAndroidScannerModule();
 
 	const { barcodes } = await BarcodeScanner.scan({
 		formats: [BarcodeFormat.QrCode],
@@ -55,21 +93,6 @@ export async function activateFromQrScan(): Promise<{ displayName: string }> {
 	if (!raw) {
 		throw new Error('No QR code detected');
 	}
-	if (!ACTIVATION_CODE_PATTERN.test(raw)) {
-		throw new Error('Not a Field activation QR (expected field1.…)');
-	}
 
-	const result = await activateMobile(raw, {
-		deviceLabel: `${Capacitor.getPlatform()} device`,
-	});
-
-	await saveMobileSession({
-		deviceSessionToken: result.deviceSessionToken,
-		userId: result.userId,
-		displayName: result.displayName,
-		role: result.role,
-		apiBaseUrl: apiUrl('/api').replace(/\/api$/, ''),
-	});
-
-	return { displayName: result.displayName };
+	return activateWithCode(raw);
 }

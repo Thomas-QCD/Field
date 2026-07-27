@@ -6,12 +6,17 @@ import {
 	Button,
 	Stack,
 	Text,
+	TextInput,
 	Title,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Capacitor } from '@capacitor/core';
 import { LogOut, QrCode } from 'lucide-react';
-import { activateFromQrScan } from '../auth/activateFromQr';
+import {
+	activateFromQrScan,
+	activateWithCode,
+	canScanActivationQr,
+} from '../auth/activateFromQr';
 import { clearMobileSession } from '../auth/mobileSession';
 import { UserSelect } from '../components/UserSelect';
 import { useCurrentUser } from '../context/CurrentUserContext';
@@ -21,29 +26,32 @@ export function MorePage() {
 	const isDesktop = useMediaQuery('(min-width: 48em)');
 	const isNative = Capacitor.isNativePlatform();
 	const { mobileSession, refreshAfterMobileActivation } = useCurrentUser();
-	const [scanning, setScanning] = useState(false);
+	const [code, setCode] = useState('');
+	const [busy, setBusy] = useState(false);
 	const [deactivating, setDeactivating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [success, setSuccess] = useState<string | null>(null);
+	const showScan = canScanActivationQr();
 
 	if (isDesktop) {
 		return <Navigate to='/' replace />;
 	}
 
-	const handleScanQr = async () => {
+	const finishActivate = async (fn: () => Promise<{ displayName: string }>) => {
 		setError(null);
 		setSuccess(null);
-		setScanning(true);
+		setBusy(true);
 		try {
-			const { displayName } = await activateFromQrScan();
+			const { displayName } = await fn();
 			await refreshAfterMobileActivation();
 			setSuccess(`Signed in as ${displayName}`);
+			setCode('');
 		} catch (err: unknown) {
 			setError(
-				err instanceof Error ? err.message : 'Failed to scan activation QR',
+				err instanceof Error ? err.message : 'Failed to activate device',
 			);
 		} finally {
-			setScanning(false);
+			setBusy(false);
 		}
 	};
 
@@ -113,15 +121,40 @@ export function MorePage() {
 							{success}
 						</Alert>
 					) : null}
+					<TextInput
+						label='Activation code'
+						placeholder='field1.…'
+						value={code}
+						onChange={(e) => setCode(e.currentTarget.value)}
+						disabled={busy}
+						autoCapitalize='off'
+						autoCorrect='off'
+						spellCheck={false}
+					/>
 					<Button
-						leftSection={<QrCode size={18} />}
-						onClick={() => void handleScanQr()}
-						loading={scanning}
+						onClick={() => void finishActivate(() => activateWithCode(code))}
+						loading={busy}
+						disabled={busy || !code.trim()}
 						color='brand'
 						fullWidth
 					>
-						Scan new activation QR
+						Activate with code
 					</Button>
+					{showScan ? (
+						<Button
+							leftSection={<QrCode size={18} />}
+							onClick={() =>
+								void finishActivate(() => activateFromQrScan())
+							}
+							loading={busy}
+							disabled={busy}
+							variant='light'
+							color='brand'
+							fullWidth
+						>
+							Scan new activation QR
+						</Button>
+					) : null}
 					{mobileSession ? (
 						<Button
 							leftSection={<LogOut size={18} />}
@@ -135,8 +168,8 @@ export function MorePage() {
 						</Button>
 					) : null}
 					<Text size='sm' c='dimmed'>
-						Scan a QR issued from the desktop Users page to re-authenticate this
-						device. Deactivate clears the local session (same as a remote
+						Paste a field1.… code from the desktop Users page (or scan on
+						Android). Deactivate clears the local session (same as a remote
 						revoke).
 					</Text>
 				</Stack>

@@ -40,6 +40,9 @@ const ACTIVE_CLASS = 'multi-shot-camera-active';
 
 async function ensureCameraPermission(): Promise<void> {
 	if (!Capacitor.isNativePlatform()) return;
+	// ML Kit permission helper is Android-only (not linked on iOS — breaks simulators).
+	// On iOS, CameraPreview.start prompts via NSCameraUsageDescription.
+	if (Capacitor.getPlatform() !== 'android') return;
 	const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning');
 	const { camera } = await BarcodeScanner.requestPermissions();
 	if (camera !== 'granted' && camera !== 'limited') {
