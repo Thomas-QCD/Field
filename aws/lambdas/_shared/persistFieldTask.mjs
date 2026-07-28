@@ -1,7 +1,6 @@
 export const WODELY_SYNC_USER_ID = "a0000000-0000-4000-8000-000000000001";
 
 const FIELD_STATUSES = new Set([
-  "Created",
   "Unassigned",
   "Assigned",
   "Loaded",
@@ -138,6 +137,7 @@ export function mapTaskStatus(statusDesc, webhookState) {
   if (webhookState === "Cancelled") return "Cancelled";
   if (statusDesc === "Transit") return "Loaded";
   if (statusDesc === "Arrived") return "In Progress";
+  if (statusDesc === "Created") return "Unassigned";
   if (FIELD_STATUSES.has(statusDesc)) return statusDesc;
   if (webhookState === "Completed") return "Completed";
   if (webhookState === "Failed") return "Failed";

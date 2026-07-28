@@ -120,21 +120,23 @@ Android and iOS apps are delivered by wrapping the **same built web app** in a n
 
 ## Development environment
 
-App, API, and most services run on the developer machine. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-attachments`** are provisioned in account `730335210534`, region `us-west-1`, for cloud-backed local development. Do not provision SES or other AWS resources without user approval. **Do not provision Cognito** — web auth is Entra ID, not Cognito.
+App, API, and most services run on the developer machine. **RDS PostgreSQL `field-dev`**, **S3 `field-dev-attachments`**, and **SES** (domain `qcdlv.net`) are available in account `730335210534`, region `us-west-1`, for cloud-backed local development. Do not provision additional AWS resources without user approval. **Do not provision Cognito** — web auth is Entra ID, not Cognito.
 
 | Concern      | Local (now)                                              | AWS / identity (current / target)                          |
 | ------------ | -------------------------------------------------------- | ----------------------------------------------- |
 | Database     | PostgreSQL via Docker Compose, or RDS `field-dev`        | **RDS `field-dev`** (us-west-1) — see `.env.example` |
-| API          | `localhost` — Node/other runtime on dev machine          | ECS Fargate, Lambda, etc. (not yet)             |
-| Web app      | Vite dev server                                          | S3 + CloudFront (not yet)                       |
+| API          | `localhost` — Node/other runtime on dev machine          | **ECS Fargate + ALB** (staging CDK in [`infra/`](infra/); see [`docs/staging.md`](docs/staging.md)) |
+| Web app      | Vite dev server                                          | **S3 + CloudFront** (staging CDK; generic `*.cloudfront.net` until DNS) |
 | File storage | Task attachments via S3 `field-dev-attachments` (presigned URLs); PDF scripts still write `./storage/documents` | S3                                          |
 | Web auth     | Simple local auth (dev users, JWT stub, or session mock) | **Microsoft Entra ID** (MSAL) — not Cognito     |
-| Email        | Log to console, write to file, or Mailpit/Mailhog        | Amazon SES (not yet)                            |
+| Email        | **Amazon SES** via SDK (`EMAIL_PROVIDER=ses`); `console` fallback | Amazon SES — From `noreply@qcdlv.net` |
 | PDF output   | Local `./storage/documents`                              | S3 (later)                                      |
 
 **RDS `field-dev` (dev):** `db.t4g.micro`, Single-AZ, 20 GB gp3, publicly accessible, security group locked to the developer public IP. Master password in Secrets Manager. Connection placeholders in [`.env.example`](.env.example).
 
 **S3 `field-dev-attachments` (dev):** private bucket in us-west-1 for task attachments (presigned PUT/GET). CORS allows browser Vite, Android emulator (`10.0.2.2`), Capacitor WebView origins, and the current LAN IP for `cap:live -- device`. When the LAN IP changes: `npm run s3:cors`. Env: `AWS_REGION`, `S3_BUCKET` in [`.env.example`](.env.example).
+
+**SES (dev):** domain identity `qcdlv.net` verified in us-west-1 (DKIM OK); default From `noreply@qcdlv.net`; config set `notify_on_error`. Pipeline: [`server/email.mjs`](server/email.mjs) + [`server/emailDeliveries.mjs`](server/emailDeliveries.mjs). Smoke test: `npm run email:test`. Env: `EMAIL_PROVIDER`, `EMAIL_FROM`, `EMAIL_CONFIGURATION_SET` in [`.env.example`](.env.example).
 
 **Wodely sync (AWS):** Licensed-system webhooks hit Lambda `WOO-message-handler` (API Gateway); reconciler `updateModifiedWooTasks` runs on EventBridge Scheduler. Both dual-write DynamoDB `WOO-tasks` and RDS `field` (`tasks.id` = Wodely Id). Source under [`aws/lambdas/`](aws/lambdas/). Type/status mapping in [`docs/database-design.md`](docs/database-design.md).
 
@@ -153,11 +155,11 @@ Production will run on **AWS**. Do not set this up until the user directs integr
 
 | Concern            | Common AWS fit                                                                                        |
 | ------------------ | ----------------------------------------------------------------------------------------------------- |
-| API                | API Gateway + Lambda, or ECS/Fargate for a long-running Node API                                      |
+| API                | **ALB + ECS Fargate** (staging CDK); Lambda for Wodely sync / async jobs                          |
 | Auth               | **Microsoft Entra ID** (web only; not Cognito); mobile uses QR-activated device sessions             |
 | File uploads       | S3 with presigned URLs (task photos, attachments)                                                     |
 | Database           | **RDS PostgreSQL** — schema in [`docs/database-design.md`](docs/database-design.md)                   |
-| Static web hosting | S3 + CloudFront                                                                                       |
+| Static web hosting | **S3 + CloudFront** — staging uses default `*.cloudfront.net` URL; custom domain when DNS unblocked |
 | Push notifications | SNS, or FCM/APNs integration via Capacitor plugins                                                    |
 | Email              | **Amazon SES** — automatic task emails (see [`docs/critical-features.md`](docs/critical-features.md)) |
 | PDF storage        | **S3** — generated shipping labels, dockets, PODs                                                     |
@@ -223,13 +225,15 @@ There is an existing licensed FWM product that serves as the functional referenc
 - **Project name:** Field
 - **Workspace directory:** `orders` (local folder name; product name is Field)
 - **Contents:** Vite + React + TypeScript web app (Tasks shell); docs under `docs/`.
-- **Docs:** [`docs/sdd.md`](docs/sdd.md) (master design), `AGENTS.md`, `docs/task-model.md`, `docs/database-design.md`, `docs/critical-features.md`, [`docs/pdf-delivery-docket.md`](docs/pdf-delivery-docket.md).
+- **Docs:** [`docs/sdd.md`](docs/sdd.md) (master design), `AGENTS.md`, `docs/task-model.md`, `docs/database-design.md`, `docs/critical-features.md`, [`docs/pdf-delivery-docket.md`](docs/pdf-delivery-docket.md), [`docs/staging.md`](docs/staging.md).
 - **Run locally:** `npm install && npm run dev` → http://localhost:5173 (API on `:3000`)
 - **Tests:** Vitest — `npm test` / `npm run test:watch` (`*.test.ts(x)` under `tests/`)
 - **Stop / restart dev servers:** `npm run dev:stop` frees ports 3000 + 5173; `npm run dev:restart` stops then starts. Prefer these over hunting PIDs.
 - **Agent rule for servers:** Prefer one shared `npm run dev`. Before starting API/Vite, run `npm run dev:stop` (or rely on `npm run dev`, which frees those ports first). Do not leave orphan `node server/index.mjs` / `vite` processes; use `dev:stop` when done verifying.
 - **Mobile (Capacitor):** `npm run cap:live` (hot reload) / `cap:sync` / `cap:android` / `cap:ios` — see [`README.md`](README.md) Mobile section.
+- **Staging (AWS):** CDK under `infra/` — do **not** `cdk deploy` without user approval. Runbook: [`docs/staging.md`](docs/staging.md).
 - **Delivery docket PDF:** `npm run pdf:docket` → `storage/documents/`
+- **Email pipeline test:** `npm run email:test` → SES → `email_deliveries`
 - **Import venues:** `npm run db:import-addresses` (CSV Name → `addresses.address_name`)
 - **Import people contacts:** `npm run db:import-contacts` (people only — not the venue CSV)
 
@@ -254,7 +258,7 @@ Master design in [`docs/sdd.md`](docs/sdd.md); proceed with MVP vertical slices.
 - **Web:** authenticated session (local auth in dev; Entra JWT in production) — auth not wired yet.
 - **Mobile:** deactivated until QR activation; durable device session; remote revoke supported in design (not implemented yet).
 - Do not unify auth across clients — web uses Entra/local JWT; mobile uses QR-issued device sessions. Cognito is not part of the stack.
-- RDS `field-dev` and S3 `field-dev-attachments` exist in us-west-1; do not provision other AWS services without user approval.
+- RDS `field-dev`, S3 `field-dev-attachments`, and SES (`qcdlv.net`) exist in us-west-1; do not provision other AWS services without user approval.
 
 ## Open Questions (to resolve with the user)
 

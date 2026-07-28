@@ -42,6 +42,10 @@ export default function App() {
 								<Route path='/tasks' element={<TasksPage mode='all' />} />
 								<Route path='/my-tasks' element={<TasksPage mode='mine' />} />
 								<Route
+									path='/delivery'
+									element={<TasksPage mode='delivery' />}
+								/>
+								<Route
 									path='/task/:taskId/complete'
 									element={<CompleteTaskPage />}
 								/>

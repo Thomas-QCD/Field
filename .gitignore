@@ -21,6 +21,11 @@ coverage
 aws/lambdas/.build
 .tmp-lambdas
 
+# CDK
+infra/cdk.out
+infra/dist
+infra/node_modules
+
 # Generated PDFs / uploads (local storage provider)
 storage/documents/*
 !storage/documents/.gitkeep

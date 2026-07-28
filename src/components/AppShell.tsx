@@ -11,6 +11,7 @@ import {
 	Map,
 	MapPinned,
 	Menu,
+	Truck,
 	Users,
 } from 'lucide-react';
 import { useCurrentUser } from '../context/CurrentUserContext';
@@ -29,7 +30,7 @@ const bottomNavItems = [
 	{ to: '/my-tasks', end: false, label: 'My Tasks', icon: ClipboardCheck },
 	{ to: '/tasks', end: false, label: 'All Tasks', icon: ClipboardList },
 	{ to: '/contacts', end: false, label: 'Contacts', icon: Contact },
-	{ to: '/addresses', end: false, label: 'Addresses', icon: MapPinned },
+	{ to: '/delivery', end: false, label: 'Delivery', icon: Truck },
 	{ to: '/more', end: false, label: 'More', icon: Menu },
 ] as const;
 
@@ -108,6 +109,17 @@ export function FieldAppShell() {
 						label='All Tasks'
 						leftSection={<ClipboardList size={18} />}
 						active={location.pathname === '/tasks'}
+						color='brand'
+						styles={navLinkStyles}
+						className='field-nav-link'
+						mt={4}
+					/>
+					<NavLink
+						component={RouterNavLink}
+						to='/delivery'
+						label='Delivery'
+						leftSection={<Truck size={18} />}
+						active={location.pathname === '/delivery'}
 						color='brand'
 						styles={navLinkStyles}
 						className='field-nav-link'

@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import { formatShortName, formatShortNameList } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
+import { TaskStatusBadge } from './TaskStatusBadge';
 
 function formatWindow(start: string | null, end: string | null): string {
 	return `${formatShortDateTimeWithAgo(start)} – ${formatShortDateTimeWithAgo(end)}`;
@@ -61,9 +62,7 @@ function TaskCard({
 							? `${task.taskType} - #${task.externalKey}`
 							: task.taskType}
 					</span>
-					<span className='task-status' data-status={task.status}>
-						{task.status}
-					</span>
+					<TaskStatusBadge status={task.status} />
 				</header>
 
 				<div className='task-card-meta'>

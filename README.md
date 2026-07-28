@@ -65,3 +65,7 @@ npm run cap:ios       # sync + open Xcode (macOS only)
 **iOS (Mac only)** — Full walkthrough: [`docs/ios-quickstart.md`](docs/ios-quickstart.md). Short version: clone/pull, `npm install`, configure `.env`, `npm run dev`, then `npm run cap:live -- ios` and open `ios/App/App.xcworkspace` in Xcode (or `npm run cap:ios` for a bundled build). Pick an iPhone simulator → Run.
 
 If `ios/` is missing on the Mac, run `npx cap add ios` once and commit it.
+
+### Staging (AWS)
+
+Generic CloudFront URL (no custom DNS). CDK under `infra/` — **do not deploy until approved**. Runbook: [`docs/staging.md`](docs/staging.md).

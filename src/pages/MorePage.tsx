@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, NavLink as RouterNavLink } from 'react-router-dom';
 import {
 	Alert,
 	Box,
 	Button,
+	NavLink,
 	Stack,
 	Text,
 	TextInput,
@@ -11,7 +12,7 @@ import {
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Capacitor } from '@capacitor/core';
-import { LogOut, QrCode } from 'lucide-react';
+import { ChevronRight, LogOut, MapPinned, QrCode } from 'lucide-react';
 import {
 	activateFromQrScan,
 	activateWithCode,
@@ -99,6 +100,31 @@ export function MorePage() {
 			) : (
 				<UserSelect variant='light' />
 			)}
+
+			<Stack mt='xl' gap={4}>
+				<Text
+					fz={11}
+					tt='uppercase'
+					fw={600}
+					c='dimmed'
+					mb={2}
+					style={{ letterSpacing: '0.04em' }}
+				>
+					Pages
+				</Text>
+				<NavLink
+					component={RouterNavLink}
+					to='/addresses'
+					label='Addresses'
+					leftSection={<MapPinned size={18} />}
+					rightSection={<ChevronRight size={16} />}
+					color='brand'
+					styles={{
+						root: { borderRadius: 'var(--mantine-radius-md)' },
+						label: { fontWeight: 500 },
+					}}
+				/>
+			</Stack>
 
 			{isNative ? (
 				<Stack mt='xl' gap='sm'>

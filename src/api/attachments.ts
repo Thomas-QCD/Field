@@ -55,7 +55,10 @@ export function maxBytesForMime(mimeType: string): number {
 		: MAX_ATTACHMENT_BYTES;
 }
 
-export function oversizeErrorMessage(mimeType: string, maxBytes: number): string {
+export function oversizeErrorMessage(
+	mimeType: string,
+	maxBytes: number,
+): string {
 	if (isVideoMime(mimeType)) {
 		return `Video exceeds ${Math.round(maxBytes / (1024 * 1024))} MB. Record at a lower resolution (try 1080p) if possible.`;
 	}

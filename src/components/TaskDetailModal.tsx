@@ -28,6 +28,7 @@ import { formatTimeAgo } from '../formatTime';
 import type { TaskDetail, TaskStatus } from '../types/task';
 import { KeyboardAwareModal } from './KeyboardAwareModal';
 import { TaskAttachments } from './TaskAttachments';
+import { TaskStatusBadge } from './TaskStatusBadge';
 
 interface TaskDetailModalProps {
 	taskId: number | null;
@@ -38,21 +39,8 @@ interface TaskDetailModalProps {
 	onStatusChange?: (task: { id: number; status: TaskStatus }) => void;
 }
 
-const STATUS_COLOR: Record<TaskStatus, string> = {
-	Created: 'gray',
-	Unassigned: 'yellow',
-	Assigned: 'blue',
-	Loaded: 'cyan',
-	'In Progress': 'indigo',
-	Completed: 'green',
-	Failed: 'red',
-	Undetermined: 'orange',
-	Cancelled: 'gray',
-};
-
 /** Mirrors server/createTask.mjs STATUS_TRANSITIONS (admin / manual). */
 const STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-	Created: ['Unassigned', 'Assigned'],
 	Unassigned: ['Assigned'],
 	Assigned: ['Loaded', 'In Progress', 'Failed'],
 	Loaded: ['In Progress', 'Failed'],
@@ -383,9 +371,7 @@ export function TaskDetailModal({
 						<Badge variant='light' color='brand'>
 							{task.taskType}
 						</Badge>
-						<Badge variant='light' color={STATUS_COLOR[task.status]}>
-							{task.status}
-						</Badge>
+						<TaskStatusBadge status={task.status} />
 					</Group>
 				) : (
 					title

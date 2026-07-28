@@ -22,14 +22,14 @@
   --color-border: #d4d4d4;
 
   /* Status — exempt from brand-only rule; distinct hues for readability */
-  --color-status-created: #737373;
-  --color-status-unassigned: #a67c2e;
-  --color-status-assigned: #2b6cb0;
-  --color-status-loaded: #0d7a6f;
-  --color-status-in-progress: #2f855a;
-  --color-status-completed: #525252;
-  --color-status-undetermined: #d9480f;
-  --color-status-failed: #c53030;
+  --color-status-unassigned: #7b8188;
+  --color-status-assigned: #1988fe;
+  --color-status-loaded: #a37547;
+  --color-status-in-progress: #fe7519;
+  --color-status-completed: #3daf57;
+  --color-status-failed: #df4957;
+  --color-status-undetermined: #777777;
+  --color-status-cancelled: #3f6791;
 
   --font-sans: 'DM Sans', system-ui, sans-serif;
   --font-display: 'Outfit', system-ui, sans-serif;

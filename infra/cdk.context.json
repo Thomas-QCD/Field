@@ -1,0 +1,52 @@
+{
+  "vpc-provider:account=730335210534:filter.isDefault=true:region=us-west-1:returnAsymmetricSubnets=true": {
+    "vpcId": "vpc-091d3d111b7686e28",
+    "vpcCidrBlock": "172.31.0.0/16",
+    "ownerAccountId": "730335210534",
+    "availabilityZones": [],
+    "subnetGroups": [
+      {
+        "name": "Public",
+        "type": "Public",
+        "subnets": [
+          {
+            "subnetId": "subnet-08e4b29dcefc3f47b",
+            "cidr": "172.31.16.0/20",
+            "availabilityZone": "us-west-1a",
+            "routeTableId": "rtb-031d719b0aff44197"
+          },
+          {
+            "subnetId": "subnet-03bdc22d971823575",
+            "cidr": "172.31.0.0/20",
+            "availabilityZone": "us-west-1c",
+            "routeTableId": "rtb-031d719b0aff44197"
+          }
+        ]
+      },
+      {
+        "name": "Private",
+        "type": "Private",
+        "subnets": [
+          {
+            "subnetId": "subnet-01f661c705d5b5ffa",
+            "cidr": "172.31.32.0/25",
+            "availabilityZone": "us-west-1a",
+            "routeTableId": "rtb-0fd1f63280c463dae"
+          },
+          {
+            "subnetId": "subnet-0f76ae83f5489a247",
+            "cidr": "172.31.32.128/25",
+            "availabilityZone": "us-west-1c",
+            "routeTableId": "rtb-0fd1f63280c463dae"
+          }
+        ]
+      }
+    ]
+  },
+  "cc-api-provider:account=730335210534:expectedMatchCount=exactly-one:propertiesToReturn.0=PrefixListId:propertyMatch.PrefixListName=com.amazonaws.global.cloudfront.origin-facing:region=us-west-1:typeName=AWS$:$:EC2$:$:PrefixList": [
+    {
+      "PrefixListId": "pl-4ea04527",
+      "Identifier": "pl-4ea04527"
+    }
+  ]
+}

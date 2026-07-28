@@ -193,13 +193,13 @@ PostgreSQL enum types store the text labels used by the reference export and the
 
 | Value | Notes |
 |-------|-------|
-| `Created` | Initial state |
-| `Unassigned` | No crew member yet |
+| `Unassigned` | Initial / no crew member yet |
 | `Assigned` | Crew member set |
 | `Loaded` | Example: en route / loaded on truck |
 | `In Progress` | On site / working |
 | `Completed` | Success terminal |
 | `Failed` | Failure terminal |
+| `Undetermined` | Mixed crew outcomes / needs review |
 | `Cancelled` | Cancelled in Wodely / voided |
 
 ### Wodely sync mapping

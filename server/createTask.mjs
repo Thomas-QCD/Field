@@ -698,7 +698,6 @@ export async function updateTask(taskId, body) {
 
 /** @type {Record<string, string[]>} */
 const STATUS_TRANSITIONS = {
-  Created: ["Unassigned", "Assigned"],
   Unassigned: ["Assigned"],
   Assigned: ["Loaded", "In Progress", "Failed"],
   Loaded: ["In Progress", "Failed"],

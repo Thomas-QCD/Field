@@ -1,7 +1,9 @@
-import type { ColDef, ValueFormatterParams } from 'ag-grid-community';
+import { createElement } from 'react';
+import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import type { Address } from './api/addresses';
 import type { Contact } from './api/contacts';
-import type { Task } from './types/task';
+import { TaskStatusBadge } from './components/TaskStatusBadge';
+import type { Task, TaskStatus } from './types/task';
 import { formatTimeAgo } from './formatTime';
 
 /**
@@ -165,8 +167,13 @@ const taskColumnDefsBase: ColDef<Task>[] = [
 	{
 		field: 'status',
 		headerName: 'Status',
-		minWidth: 100,
+		minWidth: 110,
 		flex: 0.8,
+		cellRenderer: (params: ICellRendererParams<Task, TaskStatus>) => {
+			const status = params.value;
+			if (!status) return null;
+			return createElement(TaskStatusBadge, { status });
+		},
 	},
 	{
 		field: 'contactNames',

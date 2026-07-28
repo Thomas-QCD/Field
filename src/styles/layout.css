@@ -1,239 +1,247 @@
 html,
 body,
 #root {
-  height: 100%;
-  margin: 0;
+	height: 100%;
+	margin: 0;
 }
 
 /* Prevent accidental double-tap / pinch page zoom on iOS. Image zoom lives in
    AttachmentViewer (custom gestures + touch-action: none). */
 html {
-  touch-action: manipulation;
-  -webkit-text-size-adjust: 100%;
+	touch-action: manipulation;
+	-webkit-text-size-adjust: 100%;
 }
 
 /* Portaled modals read these from :root (AppShell vars stay on .field-app-shell). */
 :root {
-  --field-shell-header: 0px;
-  --field-shell-footer: 0px;
-  --field-modal-gap: 8px;
+	--field-shell-header: 0px;
+	--field-shell-footer: 0px;
+	--field-modal-gap: 8px;
 }
 
 body {
-  font-family: var(--font-sans);
-  color: var(--color-text);
-  background:
-    radial-gradient(ellipse 120% 80% at 100% 0%, var(--color-bg-accent) 0%, transparent 55%),
-    radial-gradient(ellipse 80% 60% at 0% 100%, rgb(115 46 117 / 8%) 0%, transparent 50%),
-    var(--color-bg);
-  -webkit-font-smoothing: antialiased;
+	font-family: var(--font-sans);
+	color: var(--color-text);
+	background:
+		radial-gradient(
+			ellipse 120% 80% at 100% 0%,
+			var(--color-bg-accent) 0%,
+			transparent 55%
+		),
+		radial-gradient(
+			ellipse 80% 60% at 0% 100%,
+			rgb(115 46 117 / 8%) 0%,
+			transparent 50%
+		),
+		var(--color-bg);
+	-webkit-font-smoothing: antialiased;
 }
 
 .field-nav-link[data-active] {
-  background: var(--color-sidebar-active) !important;
-  color: var(--color-text-on-dark) !important;
+	background: var(--color-sidebar-active) !important;
+	color: var(--color-text-on-dark) !important;
 }
 
 .field-nav-link:hover {
-  background: var(--color-sidebar-hover) !important;
-  color: var(--color-text-on-dark) !important;
+	background: var(--color-sidebar-hover) !important;
+	color: var(--color-text-on-dark) !important;
 }
 
 .field-user-select-input {
-  background: var(--color-sidebar-hover) !important;
-  border-color: #3a3a3a !important;
-  color: var(--color-text-on-dark) !important;
+	background: var(--color-sidebar-hover) !important;
+	border-color: #3a3a3a !important;
+	color: var(--color-text-on-dark) !important;
 }
 
 .field-user-select-input::placeholder {
-  color: var(--color-text-on-dark-muted);
+	color: var(--color-text-on-dark-muted);
 }
 
 .field-user-select-input--light {
-  background: var(--color-surface-raised) !important;
-  border-color: var(--color-border) !important;
-  color: var(--color-text) !important;
+	background: var(--color-surface-raised) !important;
+	border-color: var(--color-border) !important;
+	color: var(--color-text) !important;
 }
 
 .field-user-select-input--light::placeholder {
-  color: var(--color-text-muted);
+	color: var(--color-text-muted);
 }
 
 .field-user-select-dropdown {
-  background: #1e1e1e;
-  border: 1px solid #3a3a3a;
+	background: #1e1e1e;
+	border: 1px solid #3a3a3a;
 }
 
 .field-user-select-option {
-  color: var(--color-text-on-dark);
+	color: var(--color-text-on-dark);
 }
 
 .field-user-select-option[data-combobox-selected],
 .field-user-select-option[data-combobox-active] {
-  background: var(--color-sidebar-active);
+	background: var(--color-sidebar-active);
 }
 
 .field-bottom-nav-inner {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  height: 100%;
-  width: 100%;
+	display: grid;
+	grid-template-columns: repeat(5, 1fr);
+	height: 100%;
+	width: 100%;
 }
 
 .field-bottom-nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.2rem;
-  height: 100%;
-  min-width: 0;
-  padding: 0.35rem 0.25rem;
-  color: var(--color-text-on-dark-muted);
-  text-decoration: none;
-  font-size: 0.7rem;
-  font-weight: 500;
-  line-height: 1.1;
-  text-align: center;
-  border-radius: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.2rem;
+	height: 100%;
+	min-width: 0;
+	padding: 0.35rem 0.25rem;
+	color: var(--color-text-on-dark-muted);
+	text-decoration: none;
+	font-size: 0.7rem;
+	font-weight: 500;
+	line-height: 1.1;
+	text-align: center;
+	border-radius: 0;
 }
 
 .field-bottom-nav-item span {
-  display: block;
-  width: 100%;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+	display: block;
+	width: 100%;
+	text-align: center;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .field-bottom-nav-item[data-active] {
-  color: var(--color-text-on-dark);
+	color: var(--color-text-on-dark);
 }
 
 .field-bottom-nav-item:active {
-  background: var(--color-sidebar-hover);
+	background: var(--color-sidebar-hover);
 }
 
 /* Fill the AppShell main area so grids size to visible space (not under the footer).
    Top safe-area clears the iOS status bar / notch (Android uses Capacitor
    adjustMarginsForEdgeToEdge, where these env values are typically 0). */
 .field-app-shell .mantine-AppShell-main {
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  min-height: 0;
-  /* Fallbacks first: some Android WebViews ignore dvh and then flex:1 grid
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	min-height: 0;
+	/* Fallbacks first: some Android WebViews ignore dvh and then flex:1 grid
      children collapse to 0 height (empty Tasks/Contacts/Addresses tables). */
-  height: 100%;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
-  padding-top: calc(
-    var(--app-shell-header-offset, 0rem) + var(--app-shell-padding) +
-      env(safe-area-inset-top, 0px)
-  );
+	height: 100%;
+	height: 100vh;
+	height: 100dvh;
+	overflow: hidden;
+	padding-top: calc(
+		var(--app-shell-header-offset, 0rem) + var(--app-shell-padding) +
+			env(safe-area-inset-top, 0px)
+	);
 }
 
 .field-main-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+	height: 100%;
 }
 
 /* Mobile: sidebar stays collapsed; bottom footer is the primary nav. */
 @media (max-width: 47.99em) {
-  :root {
-    /* No app header; reserve status-bar / notch for portaled modals. */
-    --field-shell-header: env(safe-area-inset-top, 0px);
-    --field-shell-footer: calc(64px + env(safe-area-inset-bottom, 0px));
-  }
+	:root {
+		/* No app header; reserve status-bar / notch for portaled modals. */
+		--field-shell-header: env(safe-area-inset-top, 0px);
+		--field-shell-footer: calc(64px + env(safe-area-inset-bottom, 0px));
+	}
 
-  .field-app-shell {
-    --app-shell-navbar-offset: 0px !important;
-    --app-shell-header-offset: 0px !important;
-    --app-shell-header-height: 0px !important;
-    /* Base tab height only — Mantine adds env(safe-area-inset-bottom) to
+	.field-app-shell {
+		--app-shell-navbar-offset: 0px !important;
+		--app-shell-header-offset: 0px !important;
+		--app-shell-header-height: 0px !important;
+		/* Base tab height only — Mantine adds env(safe-area-inset-bottom) to
        footer height/padding. Offset must include it so main clears the bar. */
-    --app-shell-footer-height: 64px;
-    --app-shell-footer-offset: calc(64px + env(safe-area-inset-bottom, 0px));
-  }
+		--app-shell-footer-height: 64px;
+		--app-shell-footer-offset: calc(64px + env(safe-area-inset-bottom, 0px));
+	}
 
-  .field-app-shell .mantine-AppShell-navbar {
-    display: none !important;
-  }
+	.field-app-shell .mantine-AppShell-navbar {
+		display: none !important;
+	}
 }
 
 /* Desktop: permanent sidebar — hide the mobile bottom nav. */
 @media (min-width: 48em) {
-  .field-app-shell {
-    --app-shell-footer-offset: 0px !important;
-    --app-shell-footer-height: 0px !important;
-  }
+	.field-app-shell {
+		--app-shell-footer-offset: 0px !important;
+		--app-shell-footer-height: 0px !important;
+	}
 
-  .field-app-shell .mantine-AppShell-footer {
-    display: none !important;
-  }
+	.field-app-shell .mantine-AppShell-footer {
+		display: none !important;
+	}
 }
 
 /* Admin crew map — full-bleed Leaflet inside AppShell main. */
 .field-crew-map-page {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  margin: calc(var(--app-shell-padding, 1rem) * -1);
-  width: calc(100% + 2 * var(--app-shell-padding, 1rem));
-  height: calc(100% + 2 * var(--app-shell-padding, 1rem));
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	margin: calc(var(--app-shell-padding, 1rem) * -1);
+	width: calc(100% + 2 * var(--app-shell-padding, 1rem));
+	height: calc(100% + 2 * var(--app-shell-padding, 1rem));
 }
 
 .field-crew-map {
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
+	flex: 1 1 auto;
+	min-height: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 0;
 }
 
 .field-crew-marker {
-  background: transparent;
-  border: none;
+	background: transparent;
+	border: none;
 }
 
 .field-crew-marker-circle {
-  box-sizing: border-box;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-accent);
-  color: #fff;
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+	box-sizing: border-box;
+	width: 36px;
+	height: 36px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--color-accent);
+	color: #fff;
+	font-family: var(--font-sans);
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	border: 2px solid #fff;
+	box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
 }
 
 .field-crew-popup {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 1.4;
-  min-width: 12rem;
+	font-family: var(--font-sans);
+	font-size: 13px;
+	line-height: 1.4;
+	min-width: 12rem;
 }
 
 .field-crew-popup strong {
-  display: block;
-  margin-bottom: 0.25rem;
-  font-size: 14px;
+	display: block;
+	margin-bottom: 0.25rem;
+	font-size: 14px;
 }
 
 .field-crew-popup div + div {
-  margin-top: 0.2rem;
-  color: #444;
+	margin-top: 0.2rem;
+	color: #444;
 }

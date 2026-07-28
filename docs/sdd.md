@@ -72,7 +72,7 @@ App and API run locally. **RDS PostgreSQL `field-dev`** and **S3 `field-dev-atta
 | Web app      | Vite dev server                              | S3 + CloudFront               |
 | Files / PDFs | Attachments → S3 `field-dev-attachments`; PDF scripts → `./storage/documents` | S3          |
 | Web auth     | Dev auth stub or simple JWT                  | **Microsoft Entra ID** (MSAL) — not Cognito |
-| Email        | Console, file, or Mailpit                    | SES                           |
+| Email        | **SES** via SDK (or `EMAIL_PROVIDER=console`) | SES — From `noreply@qcdlv.net` |
 
 Use **provider abstractions** (storage, email, auth) so AWS can be swapped in without rewriting business logic. Agents must not create AWS resources unless the user explicitly requests them.
 
@@ -107,8 +107,8 @@ flowchart TB
     subgraph aws [AWS - integrate when user specifies]
         CF[CloudFront]
         S3Web[S3 - static web]
-        APIGW[API Gateway]
-        API[API Service]
+        ALB[ALB]
+        API[ECS Fargate API]
         RDS[(RDS PostgreSQL)]
         S3Files[S3 - attachments and PDFs]
         SES[SES - email]
@@ -117,9 +117,9 @@ flowchart TB
 
     Web --> CF --> S3Web
     Web --> Entra
-    Web --> APIGW
-    Mobile --> APIGW
-    APIGW --> API
+    Web --> CF
+    CF -->|"/api/*"| ALB --> API
+    Mobile --> ALB
     API --> RDS
     API --> S3Files
     API --> SES
@@ -228,25 +228,26 @@ create → assign → execute → complete | fail
 
 | Code         | Name       | Terminal |
 | ------------ | ---------- | -------- |
-| `created`    | Created    | No       |
 | `unassigned` | Unassigned | No       |
 | `assigned`   | Assigned   | No       |
 | `loaded`       | Loaded      | No       |
 | `in_progress`  | In Progress | No       |
 | `completed`    | Completed   | Yes      |
 | `failed`       | Failed      | Yes      |
+| `undetermined` | Undetermined | Yes    |
 | `cancelled`    | Cancelled   | Yes      |
 
 ### 5.4 Status transitions (draft)
 
 ```text
-created       → unassigned | assigned
 unassigned    → assigned
-assigned      → loaded | failed
+assigned      → loaded | in_progress | failed
 loaded        → in_progress | failed
-in_progress   → completed | failed
-completed     → (terminal)
+in_progress   → completed | failed | undetermined
+completed     → in_progress (reopen)
 failed        → (terminal)
+undetermined  → (terminal)
+cancelled     → (terminal)
 ```
 
 **Crew Start / End** (separate from admin status PATCH): each assigned crew member logs at most one `started` and one `ended` in `task_crew_events` (time + optional GPS). Task status is derived:
@@ -491,7 +492,7 @@ Task event → API creates email_deliveries (pending) → email provider send
     → update status (sent | failed) → retry on failure
 ```
 
-**Local dev:** log email body to console, write to file, or use Mailpit. **Production:** Amazon SES.
+**Implemented (pipeline only):** [`server/email.mjs`](../server/email.mjs) (SES default / console) + [`server/emailDeliveries.mjs`](../server/emailDeliveries.mjs). Manual smoke test: `npm run email:test`. From `noreply@qcdlv.net` (domain `qcdlv.net` in us-west-1). Automatic task-event triggers not wired yet.
 
 **Data sources:** assigned contact emails (`contacts` via `task_contacts`), task fields, links to PDFs.
 
@@ -612,7 +613,7 @@ App, API, storage, email, and auth run on the developer machine. Database may be
 | API       | Node process on `localhost:3000` (port TBD)         |
 | Web       | Vite on `localhost:5173`                            |
 | Storage   | Attachments → S3 `field-dev-attachments`; PDF scripts → `./storage/documents` |
-| Email     | Console log or Mailpit                              |
+| Email     | SES SDK (`EMAIL_PROVIDER=ses`) or console           |
 | Auth      | Dev user seed + local JWT                           |
 
 Connection placeholders: [`.env.example`](../.env.example).
@@ -623,29 +624,29 @@ Connection placeholders: [`.env.example`](../.env.example).
 | ------------------ | --------------------------------------- | ---------------------------------------------------- |
 | Database           | RDS PostgreSQL `field-dev`              | **Provisioned** — us-west-1, `db.t4g.micro`, Single-AZ, 20 GB gp3, public + IP-locked SG |
 | Secrets            | Secrets Manager                         | Master password for `field-dev`                      |
-| Static web hosting | S3 + CloudFront                         | Not yet                                              |
-| API                | API Gateway + ECS Fargate _(or Lambda)_ | Not yet                                              |
-| Auth               | Microsoft Entra ID (MSAL)               | Not yet (web only; Cognito out of scope)             |
-| Object storage     | S3 `field-dev-attachments`          | **Provisioned** (dev) — private, SSE-S3, CORS for web + Capacitor live reload |
-| Email              | SES                                     | Not yet                                              |
+| Static web hosting | S3 + CloudFront                         | **CDK ready** — staging stack [`infra/`](../infra/); generic `*.cloudfront.net` URL (no custom DNS yet). See [`staging.md`](staging.md). |
+| API                | ALB + ECS Fargate                       | **CDK ready** — same staging stack; path `/api/*` via CloudFront. Lambda kept for Wodely sync only. |
+| Auth               | Microsoft Entra ID (MSAL)               | Not yet (web only; Cognito out of scope); staging smoke uses local stub |
+| Object storage     | S3 `field-dev-attachments`          | **Provisioned** (dev) — private, SSE-S3, CORS for web + Capacitor live reload (+ staging origin after deploy) |
+| Email              | SES                                     | **In use (dev)** — domain `qcdlv.net`, From `noreply@qcdlv.net`, config set `notify_on_error` |
 | Async jobs         | SQS + Lambda _(optional)_               | Not yet                                              |
-| DNS / TLS          | Route 53 + ACM                          | Not yet                                              |
+| DNS / TLS          | Route 53 + ACM                          | Blocked — staging uses CloudFront default cert/hostname |
 
-**`field-dev` details:** identifier `field-dev`, DB name `field`, user `field_admin`, endpoint in `.env.example`. Security group `field-dev-db-sg` allows TCP 5432 from the developer public IP only. MVP tables via [`db/migrations/`](../db/migrations/) (empty — no seed data). Fresh DB: `npm run db:schema`. Incremental: `npm run db:schema -- db/migrations/<file>.sql`.
+**`field-dev` details:** identifier `field-dev`, DB name `field`, user `field_admin`, endpoint in `.env.example`. Security group `field-dev-db-sg` allows TCP 5432 from the developer public IP; staging CDK adds ingress from the ECS task SG. MVP tables via [`db/migrations/`](../db/migrations/) (empty — no seed data). Fresh DB: `npm run db:schema`. Incremental: `npm run db:schema -- db/migrations/<file>.sql`.
 
 ### 11.3 Environments
 
 | Environment | Purpose                                           |
 | ----------- | ------------------------------------------------- |
 | `dev`       | Local machine; Docker PostgreSQL and/or RDS `field-dev` |
-| `staging`   | AWS pre-production (when integrated)              |
+| `staging`   | AWS smoke test — CloudFront generic URL; CDK stack `FieldStaging` ([`staging.md`](staging.md)) |
 | `prod`      | AWS live (when integrated)                        |
 
-Infrastructure as Code (CDK or Terraform) — not yet; `field-dev` was created via AWS CLI.
+Infrastructure as Code: **AWS CDK** under [`infra/`](../infra/). `field-dev` RDS/S3/SES were created earlier via AWS CLI; staging compute/CDN is CDK.
 
 ### 11.4 AWS MVP stack (when integrating)
 
-RDS is started. Next when requested: S3, SES, one API compute target, CloudFront + S3 for web. Web auth is Entra ID (not Cognito). Add SQS when PDF/email async is implemented.
+RDS, attachments S3, and SES are in use. Staging CDK (not yet provisioned until approved): CloudFront + S3 web + ALB + ECS Fargate, reusing `field-dev` data plane. Web auth remains Entra ID (not Cognito). Add SQS when PDF/email async is implemented. Custom domain when DNS is unblocked.
 
 ---
 
@@ -681,7 +682,7 @@ RDS is started. Next when requested: S3, SES, one API compute target, CloudFront
 3. **Status workflow** — transitions + `task_status_events`
 4. **Mobile crew flow** — Capacitor build, QR activation, task list, status, photo upload
 5. **PDF pipeline** — one template, local `./storage/documents`
-6. **Email pipeline** — one trigger, local console/Mailpit
+6. **Email pipeline** — SES + `email_deliveries` (manual test); auto triggers next
 7. **Remaining PDFs and email triggers** — expand matrix
 8. **AWS integration** — when user specifies; swap providers (S3, SES); web auth remains Entra ID
 
@@ -712,7 +713,7 @@ Implement **vertical slices** (UI → API → DB → storage) per step, not hori
 | O2  | One mobile device per user vs multiple           | Operations           |
 | O3  | PDF/email trigger matrix                    | Feature completeness |
 | O4  | PDF template layouts                        | Document quality     |
-| O5  | Backend runtime choice (Lambda vs ECS)      | DevOps               |
+| O5  | Backend runtime choice (Lambda vs ECS)      | **Decided:** ECS Fargate + ALB for API; Lambda for Wodely/async |
 | O6  | Status transition confirmation              | Business logic       |
 | O7  | Address picker UX (free-text create vs select existing) | UX / schema          |
 | O8  | Licensed product name/vendor                | Parity validation    |

@@ -170,7 +170,9 @@ async function cropImageSource(
 	aspect: AspectRatio,
 ): Promise<File> {
 	const sourceW =
-		source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+		source instanceof HTMLVideoElement
+			? source.videoWidth
+			: source.naturalWidth;
 	const sourceH =
 		source instanceof HTMLVideoElement
 			? source.videoHeight
@@ -378,9 +380,7 @@ export function MultiShotCamera({
 				setNativeOverlayActive(false);
 				setStartFailed(true);
 				setError(
-					err instanceof Error
-						? err.message
-						: 'Could not open the camera',
+					err instanceof Error ? err.message : 'Could not open the camera',
 				);
 				if (onUnavailableRef.current) {
 					onUnavailableRef.current();
@@ -524,11 +524,7 @@ export function MultiShotCamera({
 				/>
 			) : null}
 
-			<LetterboxBars
-				rect={previewRect}
-				boxW={viewport.w}
-				boxH={viewport.h}
-			/>
+			<LetterboxBars rect={previewRect} boxW={viewport.w} boxH={viewport.h} />
 
 			{flash ? (
 				<div

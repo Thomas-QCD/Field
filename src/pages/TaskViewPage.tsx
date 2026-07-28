@@ -20,6 +20,7 @@ import {
 } from '../api/attachments';
 import { MultiShotCamera } from '../components/MultiShotCamera';
 import { TaskAttachments } from '../components/TaskAttachments';
+import { TaskStatusBadge } from '../components/TaskStatusBadge';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
@@ -273,18 +274,13 @@ function TaskViewBody({
 	const destinationName = task.destinationAddressName.trim();
 	const canNavigate = Boolean(address);
 
-	const me = userId
-		? task.crewMembers.find((m) => m.id === userId)
-		: undefined;
+	const me = userId ? task.crewMembers.find((m) => m.id === userId) : undefined;
 	const canReopenCompleted = task.status === 'Completed';
 	const canStart =
 		Boolean(me) &&
-		(canReopenCompleted ||
-			(!me?.startedAt && !isTerminalStatus(task.status)));
+		(canReopenCompleted || (!me?.startedAt && !isTerminalStatus(task.status)));
 	const canEnd =
-		Boolean(me?.startedAt) &&
-		!me?.endedAt &&
-		!isTerminalStatus(task.status);
+		Boolean(me?.startedAt) && !me?.endedAt && !isTerminalStatus(task.status);
 
 	const openCamera = () => {
 		setCameraOpen(true);
@@ -441,9 +437,7 @@ function TaskViewBody({
 			<div className='task-view-row'>
 				<div className='task-view-field'>
 					<span className='task-view-field-label'>Status</span>
-					<span className='task-status' data-status={task.status}>
-						{task.status}
-					</span>
+					<TaskStatusBadge status={task.status} />
 				</div>
 				<Field
 					label='Created by'
@@ -497,55 +491,45 @@ function TaskViewBody({
 				/>
 			</div>
 
-			{(task.completionNotes?.length ?? 0) > 0
-				? task.completionNotes.map((entry) => {
-						const at = entry.updatedAt || entry.createdAt;
-						const d = at ? new Date(at) : null;
-						const when =
-							d && !Number.isNaN(d.getTime())
-								? d.toLocaleString(undefined, {
-										year: 'numeric',
-										month: 'short',
-										day: 'numeric',
-										hour: 'numeric',
-										minute: '2-digit',
-									})
-								: '—';
-						const label =
-							entry.outcome === 'Failed' ? 'Failed' : 'Completed';
-						const who = formatShortName(entry.displayName);
-						return (
-							<div key={entry.userId} className='task-view-field'>
-								<span className='task-view-field-label'>
-									{entry.outcome === 'Failed'
-										? 'Failed reason'
-										: 'Completed notes'}
-								</span>
-								<span className='task-view-field-value'>
-									{entry.notes?.trim() || '—'}
-								</span>
-								<span className='task-view-completion-meta'>
-									{label} at {when} by {who}
-								</span>
-							</div>
-						);
-					})
-				: task.status === 'Failed'
-					? (
-							<Field label='Failed reason' value={task.failedReason ?? ''} />
-						)
-					: task.status === 'Completed' || task.completedNotes
-						? (
-								<Field
-									label='Completed notes'
-									value={task.completedNotes ?? ''}
-								/>
-							)
-						: task.failedReason
-							? (
-									<Field label='Failed reason' value={task.failedReason} />
-								)
-							: null}
+			{(task.completionNotes?.length ?? 0) > 0 ? (
+				task.completionNotes.map((entry) => {
+					const at = entry.updatedAt || entry.createdAt;
+					const d = at ? new Date(at) : null;
+					const when =
+						d && !Number.isNaN(d.getTime())
+							? d.toLocaleString(undefined, {
+									year: 'numeric',
+									month: 'short',
+									day: 'numeric',
+									hour: 'numeric',
+									minute: '2-digit',
+								})
+							: '—';
+					const label = entry.outcome === 'Failed' ? 'Failed' : 'Completed';
+					const who = formatShortName(entry.displayName);
+					return (
+						<div key={entry.userId} className='task-view-field'>
+							<span className='task-view-field-label'>
+								{entry.outcome === 'Failed'
+									? 'Failed reason'
+									: 'Completed notes'}
+							</span>
+							<span className='task-view-field-value'>
+								{entry.notes?.trim() || '—'}
+							</span>
+							<span className='task-view-completion-meta'>
+								{label} at {when} by {who}
+							</span>
+						</div>
+					);
+				})
+			) : task.status === 'Failed' ? (
+				<Field label='Failed reason' value={task.failedReason ?? ''} />
+			) : task.status === 'Completed' || task.completedNotes ? (
+				<Field label='Completed notes' value={task.completedNotes ?? ''} />
+			) : task.failedReason ? (
+				<Field label='Failed reason' value={task.failedReason} />
+			) : null}
 
 			{task.description ? (
 				<p className='task-view-description'>{task.description}</p>
@@ -637,9 +621,7 @@ export function TaskViewPage() {
 								? {
 										...m,
 										startedAt:
-											eventType === 'started'
-												? event.recordedAt
-												: m.startedAt,
+											eventType === 'started' ? event.recordedAt : m.startedAt,
 										endedAt:
 											eventType === 'started'
 												? null

@@ -7,6 +7,7 @@ import {
 	Group,
 	Loader,
 	Menu,
+	SegmentedControl,
 	Title,
 	Box,
 } from '@mantine/core';
@@ -19,7 +20,7 @@ import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
 import { uploadAttachment } from '../api/attachments';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
-import type { Task, TaskDetail } from '../types/task';
+import type { Task, TaskDetail, TaskStatus } from '../types/task';
 import {
 	NewTaskModal,
 	type NewTaskFormValues,
@@ -36,6 +37,43 @@ import {
 	type TaskColumnField,
 	writeVisibleTaskColumns,
 } from '../agGridDefaults';
+
+/** Desktop list filter tabs (label → matching task statuses). */
+const STATUS_TABS = [
+	{ value: 'in_progress', label: 'In Progress', statuses: ['In Progress'] },
+	{ value: 'completed', label: 'Completed', statuses: ['Completed'] },
+	{ value: 'failed', label: 'Failed', statuses: ['Failed'] },
+	{
+		value: 'upcoming',
+		label: 'Upcoming',
+		statuses: ['Unassigned', 'Assigned', 'Loaded'],
+	},
+	{ value: 'cancelled', label: 'Cancelled', statuses: ['Cancelled'] },
+] as const satisfies ReadonlyArray<{
+	value: string;
+	label: string;
+	statuses: readonly TaskStatus[];
+}>;
+
+type StatusTabValue = (typeof STATUS_TABS)[number]['value'];
+
+const DEFAULT_STATUS_TAB: StatusTabValue = 'in_progress';
+
+const DAY_FILTER_OPTIONS = [
+	{ label: 'All', value: 'all' },
+	{ label: 'Today', value: 'today' },
+	{ label: 'Tomorrow', value: 'tomorrow' },
+] as const;
+
+type DayFilterValue = (typeof DAY_FILTER_OPTIONS)[number]['value'];
+
+function matchesStatusTab(
+	status: TaskStatus,
+	tab: StatusTabValue,
+): boolean {
+	const entry = STATUS_TABS.find((t) => t.value === tab);
+	return entry ? (entry.statuses as readonly TaskStatus[]).includes(status) : false;
+}
 
 function toDateTimeLocal(iso: string | null): string {
 	if (!iso) {
@@ -126,7 +164,11 @@ function parseDayKey(key: string): Date {
 	return new Date(y, m - 1, d);
 }
 
-export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
+export function TasksPage({
+	mode = 'all',
+}: {
+	mode?: 'all' | 'mine' | 'delivery';
+}) {
 	const { user } = useCurrentUser();
 	const navigate = useNavigate();
 	const isMobile = useMediaQuery(AG_GRID_MOBILE_MQ);
@@ -134,8 +176,10 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 	const [editingTask, setEditingTask] = useState<TaskDetail | null>(null);
 	const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
 	const [tasks, setTasks] = useState<Task[]>([]);
-	const [hideDelivery, setHideDelivery] = useState(false);
 	const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+	const [dayFilter, setDayFilter] = useState<DayFilterValue>('all');
+	const [statusTab, setStatusTab] =
+		useState<StatusTabValue>(DEFAULT_STATUS_TAB);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [visibleColumns, setVisibleColumns] = useState<TaskColumnField[]>(
@@ -188,12 +232,24 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 		});
 	}, [mode, taskDayKeys]);
 
+	const showStatusTabs = !isMobile;
+
 	const visibleTasks = useMemo(() => {
 		let next = tasks;
-		if (mode === 'all' && hideDelivery) {
+		if (mode === 'all') {
 			next = next.filter((task) => task.taskType !== 'Delivery');
+		} else if (mode === 'delivery') {
+			next = next.filter((task) => task.taskType === 'Delivery');
 		}
-		if (mode === 'mine' && isMobile && selectedDayKey) {
+		if (showStatusTabs) {
+			next = next.filter((task) => matchesStatusTab(task.status, statusTab));
+		}
+		if (dayFilter === 'today' || dayFilter === 'tomorrow') {
+			const day = new Date();
+			if (dayFilter === 'tomorrow') day.setDate(day.getDate() + 1);
+			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
+		}
+		if (mode === 'mine' && isMobile && selectedDayKey && dayFilter === 'all') {
 			const day = parseDayKey(selectedDayKey);
 			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
 		}
@@ -203,7 +259,15 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 			);
 		}
 		return next;
-	}, [tasks, mode, hideDelivery, isMobile, selectedDayKey]);
+	}, [
+		tasks,
+		mode,
+		isMobile,
+		selectedDayKey,
+		showStatusTabs,
+		statusTab,
+		dayFilter,
+	]);
 
 	const useCardView = mode === 'mine' && Boolean(isMobile);
 
@@ -318,67 +382,91 @@ export function TasksPage({ mode = 'all' }: { mode?: 'all' | 'mine' }) {
 		});
 	}, [editingTask]);
 
-	const pageTitle = mode === 'mine' ? 'My Tasks' : 'Tasks';
+	const pageTitle =
+		mode === 'mine' ? 'My Tasks' : mode === 'delivery' ? 'Delivery' : 'Tasks';
+	const canCreateTask = mode === 'all' || mode === 'delivery';
 
 	return (
 		<Box className='tasks-page'>
-			<Group justify='space-between' mb='md' wrap='nowrap'>
+			<Group justify='space-between' mb='md' wrap='nowrap' gap='sm'>
 				<Title order={1} fz={{ base: 'h3', sm: 'h2' }}>
 					{pageTitle}
 				</Title>
-				{mode === 'mine' ? (
-					<Button variant='default' color='brand'>
-						Show Today Only
-					</Button>
-				) : (
-					<Button
-						variant={hideDelivery ? 'light' : 'default'}
+				<Group gap='sm' wrap='nowrap'>
+					<SegmentedControl
+						value={dayFilter}
+						onChange={(value) => setDayFilter(value as DayFilterValue)}
+						data={[...DAY_FILTER_OPTIONS]}
+						radius='md'
 						color='brand'
-						onClick={() => setHideDelivery((v) => !v)}
-					>
-						{hideDelivery ? 'Show Delivery' : 'Hide Delivery'}
-					</Button>
-				)}
-				{!isMobile ? (
-					<Menu shadow='md' width={220} closeOnItemClick={false}>
-						<Menu.Target>
-							<Button
-								variant='default'
-								color='brand'
-								leftSection={<Columns3 size={18} />}
-							>
-								Columns
-							</Button>
-						</Menu.Target>
-						<Menu.Dropdown>
-							{TASK_COLUMN_OPTIONS.map((option) => (
-								<Menu.Item key={option.field} component='div'>
-									<Checkbox
-										label={option.headerName}
-										checked={visibleColumns.includes(option.field)}
-										disabled={option.required}
-										onChange={(e) =>
-											toggleColumn(option.field, e.currentTarget.checked)
-										}
-									/>
-								</Menu.Item>
-							))}
-						</Menu.Dropdown>
-					</Menu>
-				) : null}
-				{mode === 'all' ? (
-					<Button
-						leftSection={<Plus size={18} />}
-						onClick={() => {
-							setEditingTask(null);
-							setNewTaskOpen(true);
-						}}
-						color='brand'
-					>
-						New Task
-					</Button>
-				) : null}
+						aria-label='Filter tasks by start day'
+					/>
+					{!isMobile && mode !== 'mine' ? (
+						<Menu shadow='md' width={220} closeOnItemClick={false}>
+							<Menu.Target>
+								<Button
+									variant='default'
+									color='brand'
+									leftSection={<Columns3 size={18} />}
+								>
+									Columns
+								</Button>
+							</Menu.Target>
+							<Menu.Dropdown>
+								{TASK_COLUMN_OPTIONS.map((option) => (
+									<Menu.Item key={option.field} component='div'>
+										<Checkbox
+											label={option.headerName}
+											checked={visibleColumns.includes(option.field)}
+											disabled={option.required}
+											onChange={(e) =>
+												toggleColumn(option.field, e.currentTarget.checked)
+											}
+										/>
+									</Menu.Item>
+								))}
+							</Menu.Dropdown>
+						</Menu>
+					) : null}
+					{canCreateTask ? (
+						<Button
+							leftSection={<Plus size={18} />}
+							onClick={() => {
+								setEditingTask(null);
+								setNewTaskOpen(true);
+							}}
+							color='brand'
+						>
+							New Task
+						</Button>
+					) : null}
+				</Group>
 			</Group>
+
+			{showStatusTabs ? (
+				<div
+					className='tasks-status-tabs'
+					role='tablist'
+					aria-label='Filter tasks by status'
+				>
+					{STATUS_TABS.map((tab) => {
+						const selected = tab.value === statusTab;
+						return (
+							<button
+								key={tab.value}
+								type='button'
+								role='tab'
+								aria-selected={selected}
+								className='tasks-status-tab'
+								data-selected={selected || undefined}
+								onClick={() => setStatusTab(tab.value)}
+							>
+								{tab.label}
+							</button>
+						);
+					})}
+				</div>
+			) : null}
 
 			{useCardView && taskDayKeys.length > 0 ? (
 				<div

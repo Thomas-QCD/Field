@@ -30,8 +30,8 @@
 .task-detail-footer {
 	flex-shrink: 0;
 	margin-inline: calc(-1 * var(--modal-padding, var(--mantine-spacing-md)));
-	padding: var(--mantine-spacing-sm) var(--modal-padding, var(--mantine-spacing-md))
-		var(--mantine-spacing-md);
+	padding: var(--mantine-spacing-sm)
+		var(--modal-padding, var(--mantine-spacing-md)) var(--mantine-spacing-md);
 	border-top: 1px solid var(--mantine-color-default-border);
 	background: var(--mantine-color-body);
 }
@@ -264,47 +264,88 @@
 }
 
 .task-status {
-	font-size: 0.8rem;
-	font-weight: 600;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0.15rem 0.5rem;
+	border-radius: 999px;
+	font-size: 0.72rem;
+	font-weight: 650;
 	letter-spacing: 0.02em;
-}
-
-.task-status[data-status='Created'] {
-	color: var(--color-status-created);
+	line-height: 1.25;
+	color: #fff;
+	white-space: nowrap;
+	vertical-align: middle;
 }
 
 .task-status[data-status='Unassigned'] {
-	color: var(--color-status-unassigned);
+	background: var(--color-status-unassigned);
 }
 
 .task-status[data-status='Assigned'] {
-	color: var(--color-status-assigned);
+	background: var(--color-status-assigned);
 }
 
 .task-status[data-status='Loaded'] {
-	color: var(--color-status-loaded);
+	background: var(--color-status-loaded);
 }
 
 .task-status[data-status='In Progress'] {
-	color: var(--color-status-in-progress);
+	background: var(--color-status-in-progress);
 }
 
 .task-status[data-status='Completed'] {
-	color: var(--color-status-completed);
-}
-
-.task-status[data-status='Undetermined'] {
-	color: var(--color-status-undetermined);
-	background: #fff4e6;
-}
-
-.task-status[data-status='Cancelled'] {
-	background: #f1f3f5;
-	color: #495057;
+	background: var(--color-status-completed);
 }
 
 .task-status[data-status='Failed'] {
-	color: var(--color-status-failed);
+	background: var(--color-status-failed);
+}
+
+.task-status[data-status='Undetermined'] {
+	background: var(--color-status-undetermined);
+}
+
+.task-status[data-status='Cancelled'] {
+	background: var(--color-status-cancelled);
+}
+
+.tasks-status-tabs {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 0.15rem;
+	width: 100%;
+	margin: -0.35rem 0 0.85rem;
+	padding: 0;
+	border-bottom: 1px solid var(--color-border);
+}
+
+.tasks-status-tab {
+	appearance: none;
+	margin: 0;
+	padding: 0.55rem 0.85rem;
+	border: none;
+	border-bottom: 2px solid transparent;
+	margin-bottom: -1px;
+	background: transparent;
+	color: var(--color-text-muted);
+	font-family: inherit;
+	font-size: 0.875rem;
+	font-weight: 600;
+	line-height: 1.2;
+	cursor: pointer;
+}
+
+.tasks-status-tab:hover {
+	color: var(--color-text);
+}
+
+.tasks-status-tab[data-selected] {
+	color: var(--color-accent);
+	border-bottom-color: var(--color-accent);
 }
 
 .tasks-day-chips {

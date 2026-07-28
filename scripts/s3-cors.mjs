@@ -1,11 +1,14 @@
 /**
- * Re-apply S3 CORS for field-dev-attachments (web + Capacitor live reload).
+ * Re-apply S3 CORS for field-dev-attachments (web + Capacitor live reload + staging).
  *
  * Usage:
  *   node scripts/s3-cors.mjs
  *   node scripts/s3-cors.mjs --ip 192.168.1.10
+ *   node scripts/s3-cors.mjs --staging-origin https://dxxxx.cloudfront.net
  *
  * When your LAN IP changes (physical device live reload), re-run this script.
+ * After staging CloudFront exists, pass --staging-origin or set STAGING_ORIGIN;
+ * otherwise SSM /field/staging/url is used when AWS credentials work.
  */
 import { execFileSync } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
@@ -29,6 +32,38 @@ function lanIPv4() {
   return null;
 }
 
+function readStagingOrigin() {
+  const argIdx = process.argv.indexOf("--staging-origin");
+  if (argIdx >= 0 && process.argv[argIdx + 1]) {
+    return process.argv[argIdx + 1].replace(/\/$/, "");
+  }
+  if (process.env.STAGING_ORIGIN) {
+    return process.env.STAGING_ORIGIN.replace(/\/$/, "");
+  }
+  try {
+    return execFileSync(
+      "aws",
+      [
+        "ssm",
+        "get-parameter",
+        "--name",
+        "/field/staging/url",
+        "--query",
+        "Parameter.Value",
+        "--output",
+        "text",
+        "--region",
+        REGION,
+      ],
+      { encoding: "utf8" },
+    )
+      .trim()
+      .replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
 const ipArgIdx = process.argv.indexOf("--ip");
 const lanIp =
   ipArgIdx >= 0 && process.argv[ipArgIdx + 1]
@@ -50,6 +85,16 @@ if (lanIp) {
 } else {
   console.warn(
     "No LAN IPv4 found — skipping device live-reload origin. Pass --ip <addr> if needed.",
+  );
+}
+
+const stagingOrigin = readStagingOrigin();
+if (stagingOrigin) {
+  origins.push(stagingOrigin);
+  console.log(`Including staging origin: ${stagingOrigin}`);
+} else {
+  console.warn(
+    "No staging CloudFront URL found (SSM /field/staging/url). Pass --staging-origin after deploy.",
   );
 }
 

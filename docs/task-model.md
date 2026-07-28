@@ -55,7 +55,7 @@ Reference task shape from the licensed FWM product. This is a **rough draft** ca
 |-------|-----------------|-------|
 | `Id` | integer | Internal primary key |
 | `TaskType` | string | Example: `Delivery`. Field enum: Delivery, Install, Removal, Site Survey, Pickup, Other. Wodely also sends Field Workforce → Install, Appointment → Other |
-| `Status` | string | Example: `Loaded`. Field enum: Created, Unassigned, Assigned, Loaded, In Progress, Completed, Failed, Cancelled. Wodely Transit → Loaded; Wodely Arrived → In Progress |
+| `Status` | string | Example: `Loaded`. Field enum: Unassigned, Assigned, Loaded, In Progress, Completed, Failed, Undetermined, Cancelled. Wodely Transit → Loaded; Wodely Arrived → In Progress |
 | `TaskDesc` | string (multiline) | Free-text instructions; may include job codes, access codes, photo requirements |
 | `ExternalKey` | string | Reference to an external system (e.g. order/job number) |
 

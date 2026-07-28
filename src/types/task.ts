@@ -1,5 +1,4 @@
 export type TaskStatus =
-  | 'Created'
   | 'Unassigned'
   | 'Assigned'
   | 'Loaded'
