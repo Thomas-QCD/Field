@@ -213,14 +213,36 @@ const taskColumnDefsBase: ColDef<Task>[] = [
 	},
 ];
 
+/** Cancelled tasks are soft-deleted this long after cancelledAt. */
+const CANCELLED_PURGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function purgeAtFromCancelledAt(cancelledAt: string | null): string | null {
+	if (!cancelledAt) return null;
+	const ms = new Date(cancelledAt).getTime();
+	if (Number.isNaN(ms)) return null;
+	return new Date(ms + CANCELLED_PURGE_MS).toISOString();
+}
+
+const cancelledTtlColumnDef: ColDef<Task> = {
+	colId: 'ttl',
+	headerName: 'TTL',
+	valueGetter: (p) => purgeAtFromCancelledAt(p.data?.cancelledAt ?? null),
+	valueFormatter: (p: ValueFormatterParams<Task, string | null>) =>
+		formatTimeAgo(p.value ?? null) ?? '—',
+	minWidth: 100,
+	flex: 0.8,
+	sortable: true,
+};
+
 /** Full task column catalog (defaults visible until `getTaskColumnDefs` applies prefs). */
 export const taskColumnDefs: ColDef<Task>[] = taskColumnDefsBase;
 
 export function getTaskColumnDefs(
 	visibleFields: readonly TaskColumnField[],
+	opts?: { showCancelledTtl?: boolean },
 ): ColDef<Task>[] {
 	const visible = new Set(withRequiredColumns([...visibleFields]));
-	return taskColumnDefsBase.map((col) => {
+	const cols = taskColumnDefsBase.map((col) => {
 		const field = col.field as TaskColumnField | undefined;
 		if (!field) return col;
 		return {
@@ -228,6 +250,10 @@ export function getTaskColumnDefs(
 			hide: !visible.has(field),
 		};
 	});
+	if (opts?.showCancelledTtl) {
+		cols.unshift(cancelledTtlColumnDef);
+	}
+	return cols;
 }
 
 export const addressColumnDefs: ColDef<Address>[] = [

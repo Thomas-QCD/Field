@@ -258,8 +258,25 @@ export async function deleteTask(id: number): Promise<void> {
 	const res = await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
 	if (!res.ok) {
 		const data = (await res.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Delete task failed (${res.status})`);
+		throw new Error(data.error ?? `Cancel task failed (${res.status})`);
 	}
+}
+
+export async function restoreTask(
+	id: number,
+): Promise<{ id: number; status: TaskStatus }> {
+	const res = await apiFetch(`/api/tasks/${id}/restore`, { method: 'POST' });
+	const data = (await res.json().catch(() => ({}))) as {
+		error?: string;
+		task?: { id: number; status: TaskStatus };
+	};
+	if (!res.ok) {
+		throw new Error(data.error ?? `Restore task failed (${res.status})`);
+	}
+	if (!data.task) {
+		throw new Error('Restore task failed: empty response');
+	}
+	return data.task;
 }
 
 /** Fetch delivery docket PDF and open it in a new tab for viewing/printing (no download). */

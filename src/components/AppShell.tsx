@@ -1,9 +1,12 @@
+import { useEffect } from 'react';
 import {
 	Outlet,
 	NavLink as RouterNavLink,
 	useLocation,
+	useNavigate,
 } from 'react-router-dom';
 import { AppShell, NavLink, Text, Box, UnstyledButton } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import {
 	ClipboardCheck,
 	ClipboardList,
@@ -15,6 +18,7 @@ import {
 	Users,
 } from 'lucide-react';
 import { useCurrentUser } from '../context/CurrentUserContext';
+import { useDeliveryMode } from '../deliveryMode';
 import { EntraSignedIn, showEntraSignedIn } from '../auth/EntraSignedIn';
 import { UserSelect } from './UserSelect';
 
@@ -26,11 +30,16 @@ const navLinkStyles = {
 	label: { fontWeight: 500 },
 } as const;
 
-const bottomNavItems = [
+const bottomNavCrew = [
 	{ to: '/my-tasks', end: false, label: 'My Tasks', icon: ClipboardCheck },
 	{ to: '/tasks', end: false, label: 'All Tasks', icon: ClipboardList },
 	{ to: '/contacts', end: false, label: 'Contacts', icon: Contact },
+	{ to: '/more', end: false, label: 'More', icon: Menu },
+] as const;
+
+const bottomNavDelivery = [
 	{ to: '/delivery', end: false, label: 'Delivery', icon: Truck },
+	{ to: '/contacts', end: false, label: 'Contacts', icon: Contact },
 	{ to: '/more', end: false, label: 'More', icon: Menu },
 ] as const;
 
@@ -46,9 +55,23 @@ function canManageUsers(role: string | undefined): boolean {
 
 export function FieldAppShell() {
 	const location = useLocation();
+	const navigate = useNavigate();
 	const { user } = useCurrentUser();
 	const isAdmin = user?.role === 'admin';
 	const showUsersNav = canManageUsers(user?.role);
+	const [deliveryMode] = useDeliveryMode();
+	const isMobile = useMediaQuery('(max-width: 47.99em)');
+	const bottomNavItems = deliveryMode ? bottomNavDelivery : bottomNavCrew;
+
+	useEffect(() => {
+		if (!isMobile) return;
+		const path = location.pathname;
+		if (deliveryMode && (path === '/my-tasks' || path === '/tasks')) {
+			navigate('/delivery', { replace: true });
+		} else if (!deliveryMode && path === '/delivery') {
+			navigate('/my-tasks', { replace: true });
+		}
+	}, [isMobile, deliveryMode, location.pathname, navigate]);
 
 	return (
 		<AppShell

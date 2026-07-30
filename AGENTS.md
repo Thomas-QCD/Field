@@ -115,7 +115,7 @@ Android and iOS apps are delivered by wrapping the **same built web app** in a n
 
 - **React + TypeScript** for all client UI.
 - **Capacitor** for iOS and Android — private internal distribution; QR activation (not Entra SSO).
-- Capacitor 7 is scaffolded (`android/`, `ios/`). Day-to-day: `npm run cap:live` (WebView → Vite hot reload) with `npm run dev`; bundled: `npm run cap:sync`. QR activation comes later.
+- Capacitor 7 is scaffolded (`android/`, `ios/`). Day-to-day Android: `adb:virtual` / `adb:physical` with `npm run dev`; iOS: `cap:live -- ios`; bundled: `npm run cap:sync`. QR activation comes later.
 - Structure routing so web-only routes (login, create task, task board) are gated; mobile crew routes require an active device session (or show QR activation when deactivated).
 
 ## Development environment
@@ -214,7 +214,7 @@ Field workforce management covers work performed outside a central office. Model
 
 Do not implement every table or field for MVP. See [`docs/database-design.md`](docs/database-design.md) for the full schema and MVP subset. Work with the user to define the minimum slice for create → assign → execute → complete.
 
-**Related tables (summary):** `users`, `addresses`, `contacts`, `tasks` (with `task_type` / `status` enums), `task_crew_members`, `task_crew_events` (per-crew start/end + GPS), `task_contacts`, `task_attachments`, `task_status_events`, `task_documents`, `email_deliveries`.
+**Related tables (summary):** `users`, `addresses`, `contacts`, `tasks` (with `task_type` / `status` enums), `task_crew_members`, `task_crew_events` (per-crew start/end + GPS), `task_contacts`, `task_attachments`, `task_documents`, `email_deliveries`.
 
 ### Reference system
 
@@ -228,10 +228,10 @@ There is an existing licensed FWM product that serves as the functional referenc
 - **Docs:** [`docs/sdd.md`](docs/sdd.md) (master design), `AGENTS.md`, `docs/task-model.md`, `docs/database-design.md`, `docs/critical-features.md`, [`docs/pdf-delivery-docket.md`](docs/pdf-delivery-docket.md), [`docs/staging.md`](docs/staging.md).
 - **Run locally:** `npm install && npm run dev` → http://localhost:5173 (API on `:3000`)
 - **Tests:** Vitest — `npm test` / `npm run test:watch` (`*.test.ts(x)` under `tests/`)
-- **Stop / restart dev servers:** `npm run dev:stop` frees ports 3000 + 5173; `npm run dev:restart` stops then starts. Prefer these over hunting PIDs.
+- **Stop / restart dev servers:** `npm run dev:stop` frees ports 3000 + 5173; then `npm run dev` to start again. Prefer these over hunting PIDs.
 - **Agent rule for servers:** Prefer one shared `npm run dev`. Before starting API/Vite, run `npm run dev:stop` (or rely on `npm run dev`, which frees those ports first). Do not leave orphan `node server/index.mjs` / `vite` processes; use `dev:stop` when done verifying.
-- **Mobile (Capacitor):** `npm run cap:live` (hot reload) / `cap:sync` / `cap:android` / `cap:ios` — see [`README.md`](README.md) Mobile section.
-- **Staging (AWS):** CDK under `infra/` — do **not** `cdk deploy` without user approval. Runbook: [`docs/staging.md`](docs/staging.md).
+- **Mobile (Capacitor):** Android `adb:virtual` / `adb:physical`; iOS `cap:live -- ios`; bundled `cap:sync` / `cap:android` / `cap:ios` — see [`README.md`](README.md) Mobile section.
+- **Staging (AWS):** CDK under `infra/` — do **not** `cdk deploy` without user approval. Runbook: [`docs/staging.md`](docs/staging.md). Cap against staging: `npm run cap:staging`. Signed sideload APK: `npm run apk:staging` (after `android:keystore`).
 - **Delivery docket PDF:** `npm run pdf:docket` → `storage/documents/`
 - **Email pipeline test:** `npm run email:test` → SES → `email_deliveries`
 - **Import venues:** `npm run db:import-addresses` (CSV Name → `addresses.address_name`)

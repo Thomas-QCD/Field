@@ -4,10 +4,14 @@ import { AuthRoot } from './auth/AuthRoot';
 import { MobileAuthGate } from './auth/MobileAuthGate';
 import { FieldAppShell } from './components/AppShell';
 import { CurrentUserProvider, useCurrentUser } from './context/CurrentUserContext';
+import { useDeliveryMode } from './deliveryMode';
+import { NotificationTapListener } from './notifications/NotificationTapListener';
 import { AddressesPage } from './pages/AddressesPage';
 import { ContactsPage } from './pages/ContactsPage';
 import { CrewMapPage } from './pages/CrewMapPage';
 import { MorePage } from './pages/MorePage';
+import { NotificationsPage } from './pages/NotificationsPage';
+import { DeliveryPage } from './pages/DeliveryPage';
 import { TasksPage } from './pages/TasksPage';
 import { CompleteTaskPage } from './pages/CompleteTaskPage';
 import { TaskViewPage } from './pages/TaskViewPage';
@@ -15,6 +19,7 @@ import { UsersPage } from './pages/UsersPage';
 
 function HomeRedirect() {
 	const { user, loading } = useCurrentUser();
+	const [deliveryMode] = useDeliveryMode();
 
 	if (loading) {
 		return (
@@ -24,6 +29,9 @@ function HomeRedirect() {
 		);
 	}
 
+	if (deliveryMode) {
+		return <Navigate to='/delivery' replace />;
+	}
 	if (user?.role === 'crew') {
 		return <Navigate to='/my-tasks' replace />;
 	}
@@ -33,6 +41,7 @@ function HomeRedirect() {
 export default function App() {
 	return (
 		<BrowserRouter>
+			<NotificationTapListener />
 			<AuthRoot>
 				<CurrentUserProvider>
 					<MobileAuthGate>
@@ -41,10 +50,7 @@ export default function App() {
 								<Route path='/' element={<HomeRedirect />} />
 								<Route path='/tasks' element={<TasksPage mode='all' />} />
 								<Route path='/my-tasks' element={<TasksPage mode='mine' />} />
-								<Route
-									path='/delivery'
-									element={<TasksPage mode='delivery' />}
-								/>
+								<Route path='/delivery' element={<DeliveryPage />} />
 								<Route
 									path='/task/:taskId/complete'
 									element={<CompleteTaskPage />}
@@ -55,6 +61,10 @@ export default function App() {
 								<Route path='/users' element={<UsersPage />} />
 								<Route path='/crew-map' element={<CrewMapPage />} />
 								<Route path='/more' element={<MorePage />} />
+								<Route
+									path='/notifications'
+									element={<NotificationsPage />}
+								/>
 								<Route path='*' element={<Navigate to='/' replace />} />
 							</Route>
 						</Routes>

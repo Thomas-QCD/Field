@@ -6,13 +6,14 @@ import {
 	Button,
 	NavLink,
 	Stack,
+	Switch,
 	Text,
 	TextInput,
 	Title,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Capacitor } from '@capacitor/core';
-import { ChevronRight, LogOut, MapPinned, QrCode } from 'lucide-react';
+import { Bell, ChevronRight, LogOut, MapPinned, QrCode } from 'lucide-react';
 import {
 	activateFromQrScan,
 	activateWithCode,
@@ -21,12 +22,16 @@ import {
 import { clearMobileSession } from '../auth/mobileSession';
 import { UserSelect } from '../components/UserSelect';
 import { useCurrentUser } from '../context/CurrentUserContext';
+import { useDeliveryMode } from '../deliveryMode';
+import { useLargeFont } from '../largeFont';
 
 /** Mobile-only settings/account surface (user select, QR re-activate, etc.). */
 export function MorePage() {
 	const isDesktop = useMediaQuery('(min-width: 48em)');
 	const isNative = Capacitor.isNativePlatform();
 	const { mobileSession, refreshAfterMobileActivation } = useCurrentUser();
+	const [deliveryMode, setDeliveryMode] = useDeliveryMode();
+	const [largeFont, setLargeFont] = useLargeFont();
 	const [code, setCode] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [deactivating, setDeactivating] = useState(false);
@@ -58,9 +63,7 @@ export function MorePage() {
 
 	const handleDeactivate = async () => {
 		if (
-			!window.confirm(
-				'Clear this device session and return to QR activation?',
-			)
+			!window.confirm('Clear this device session and return to QR activation?')
 		) {
 			return;
 		}
@@ -101,6 +104,30 @@ export function MorePage() {
 				<UserSelect variant='light' />
 			)}
 
+			<Stack mt='xl' gap='sm'>
+				<Text
+					fz={11}
+					tt='uppercase'
+					fw={600}
+					c='dimmed'
+					style={{ letterSpacing: '0.04em' }}
+				>
+					Settings
+				</Text>
+				<Switch
+					label='Delivery mode'
+					checked={deliveryMode}
+					onChange={(e) => setDeliveryMode(e.currentTarget.checked)}
+					color='brand'
+				/>
+				<Switch
+					label='Larger text'
+					checked={largeFont}
+					onChange={(e) => setLargeFont(e.currentTarget.checked)}
+					color='brand'
+				/>
+			</Stack>
+
 			<Stack mt='xl' gap={4}>
 				<Text
 					fz={11}
@@ -117,6 +144,18 @@ export function MorePage() {
 					to='/addresses'
 					label='Addresses'
 					leftSection={<MapPinned size={18} />}
+					rightSection={<ChevronRight size={16} />}
+					color='brand'
+					styles={{
+						root: { borderRadius: 'var(--mantine-radius-md)' },
+						label: { fontWeight: 500 },
+					}}
+				/>
+				<NavLink
+					component={RouterNavLink}
+					to='/notifications'
+					label='Notifications'
+					leftSection={<Bell size={18} />}
 					rightSection={<ChevronRight size={16} />}
 					color='brand'
 					styles={{
@@ -166,12 +205,10 @@ export function MorePage() {
 					>
 						Activate with code
 					</Button>
-					{showScan ? (
+					{showScan && !mobileSession ? (
 						<Button
 							leftSection={<QrCode size={18} />}
-							onClick={() =>
-								void finishActivate(() => activateFromQrScan())
-							}
+							onClick={() => void finishActivate(() => activateFromQrScan())}
 							loading={busy}
 							disabled={busy}
 							variant='light'
@@ -193,11 +230,6 @@ export function MorePage() {
 							Deactivate this device
 						</Button>
 					) : null}
-					<Text size='sm' c='dimmed'>
-						Paste a field1.… code from the desktop Users page (or scan on
-						Android). Deactivate clears the local session (same as a remote
-						revoke).
-					</Text>
 				</Stack>
 			) : null}
 		</Box>

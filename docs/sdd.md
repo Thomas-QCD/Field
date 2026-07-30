@@ -273,7 +273,6 @@ Confirm remaining admin transitions with operations before enforcing in code.
 | `task_attachments`                | Photos, signatures (S3)                           |
 | `task_documents`                  | Generated PDFs (S3)                               |
 | `email_deliveries`                | Outbound email audit log                          |
-| `task_status_events`              | Status change history                             |
 
 Full column definitions: [`database-design.md`](database-design.md).
 
@@ -320,7 +319,6 @@ erDiagram
     tasks ||--o{ task_attachments : attachments
     tasks ||--o{ task_documents : documents
     tasks ||--o{ email_deliveries : emails
-    tasks ||--o{ task_status_events : history
 ```
 
 ### 6.3 API read model
@@ -662,7 +660,7 @@ RDS, attachments S3, and SES are in use. Staging CDK (not yet provisioned until 
 | Data     | Core tables per [`database-design.md`](database-design.md) MVP subset |
 | PDF      | At least one type (recommend: **delivery docket** first)              |
 | Email    | At least one automatic send (recommend: **completion → contact**)   |
-| Audit    | `task_status_events`, `email_deliveries` logging                      |
+| Audit    | `email_deliveries` logging; crew timeline via `task_crew_events` |
 
 ### 12.2 Explicitly deferred
 
@@ -679,7 +677,7 @@ RDS, attachments S3, and SES are in use. Staging CDK (not yet provisioned until 
 
 1. **Foundation** — repo scaffold, Docker PostgreSQL, schema migrations, local auth stub, API health
 2. **Task CRUD (web)** — create, list, view, assign
-3. **Status workflow** — transitions + `task_status_events`
+3. **Status workflow** — transitions in app code; crew start/end via `task_crew_events`
 4. **Mobile crew flow** — Capacitor build, QR activation, task list, status, photo upload
 5. **PDF pipeline** — one template, local `./storage/documents`
 6. **Email pipeline** — SES + `email_deliveries` (manual test); auto triggers next

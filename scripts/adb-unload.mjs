@@ -2,7 +2,7 @@
  * Clear ADB of whatever you're testing on (emulator and/or physical)
  * so you can attach a different device cleanly.
  *
- * Usage: npm run adb:unload
+ * Usage: node scripts/adb-unload.mjs
  *
  * Prefer `npm run adb:virtual` / `npm run adb:physical` when switching
  * targets — those also point Capacitor live reload at the right host.
@@ -73,7 +73,7 @@ if (usbLeft) {
 }
 if (wirelessLeft) {
 	console.log(
-		"\nWireless target came back — turn OFF Wireless debugging on the phone, then re-run npm run adb:unload.",
+		"\nWireless target came back — turn OFF Wireless debugging on the phone, then re-run node scripts/adb-unload.mjs.",
 	);
 }
 if (emuLeft) {

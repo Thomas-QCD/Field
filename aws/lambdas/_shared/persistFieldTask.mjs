@@ -231,7 +231,7 @@ export async function persistFieldTask(raw, options = {}) {
     await client.query("BEGIN");
 
     const existing = await client.query(
-      `SELECT id, updated_at, created_by_user_id
+      `SELECT id, status, updated_at, created_by_user_id
        FROM tasks
        WHERE id = $1
        FOR UPDATE`,
@@ -416,6 +416,48 @@ export async function persistFieldTask(raw, options = {}) {
         modifiedAt,
       ],
     );
+
+    const priorStatus =
+      existing.rowCount > 0 ? existing.rows[0].status : null;
+    if (status === "Cancelled") {
+      if (priorStatus !== "Cancelled") {
+        await client.query(
+          `INSERT INTO task_crew_events (task_id, user_id, event_type, recorded_at)
+           SELECT s.task_id, s.user_id, 'ended', now()
+           FROM task_crew_events s
+           WHERE s.task_id = $1
+             AND s.event_type = 'started'
+             AND NOT EXISTS (
+               SELECT 1
+               FROM task_crew_events e
+               WHERE e.task_id = s.task_id
+                 AND e.user_id = s.user_id
+                 AND e.event_type = 'ended'
+             )
+           ON CONFLICT (task_id, user_id, event_type) DO NOTHING`,
+          [task.id],
+        );
+        await client.query(
+          `UPDATE tasks
+           SET cancelled_at = COALESCE($2::timestamptz, now()),
+               status_before_cancel = $3::task_status
+           WHERE id = $1`,
+          [
+            task.id,
+            modifiedAt,
+            priorStatus && priorStatus !== "Cancelled" ? priorStatus : null,
+          ],
+        );
+      }
+    } else if (priorStatus === "Cancelled") {
+      await client.query(
+        `UPDATE tasks
+         SET cancelled_at = NULL,
+             status_before_cancel = NULL
+         WHERE id = $1`,
+        [task.id],
+      );
+    }
 
     await client.query(`DELETE FROM task_crew_members WHERE task_id = $1`, [
       task.id,

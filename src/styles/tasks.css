@@ -418,6 +418,202 @@
 	letter-spacing: -0.02em;
 }
 
+.delivery-count-btn {
+	font-weight: 600;
+}
+
+.delivery-status-chips {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: nowrap;
+	gap: 0.45rem;
+	width: 100%;
+	min-width: 0;
+	margin: -0.25rem 0 0.85rem;
+	padding: 0.15rem 0.1rem 0.35rem;
+}
+
+.delivery-status-chip {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	flex: 1 1 0;
+	box-sizing: border-box;
+	min-width: 0;
+	height: 3.25rem;
+	padding: 0.2rem;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+	background: var(--color-surface-raised);
+	color: var(--color-text);
+	font-family: inherit;
+	cursor: pointer;
+	appearance: none;
+}
+
+.delivery-status-chip:active {
+	background: var(--color-accent-subtle);
+}
+
+.delivery-status-chip[data-selected] {
+	border-color: var(--color-accent);
+	background: var(--color-accent-subtle);
+	color: var(--color-accent-dark);
+}
+
+.delivery-status-chip-label {
+	font-size: 0.6rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	line-height: 1;
+	color: var(--color-text-muted);
+}
+
+.delivery-status-chip[data-selected] .delivery-status-chip-label {
+	color: var(--color-accent);
+}
+
+.delivery-status-chip-count {
+	margin-top: 0.15rem;
+	font-size: 1.15rem;
+	font-weight: 700;
+	line-height: 1;
+	text-align: center;
+	letter-spacing: -0.02em;
+}
+
+.delivery-job-input {
+	width: 100%;
+}
+
+.delivery-card {
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: 100%;
+	margin: 0;
+	padding: 0.9rem 1rem;
+	text-align: left;
+	border: 1px solid var(--color-border);
+	border-radius: calc(var(--radius) + 2px);
+	background: var(--color-surface-raised);
+	box-shadow: var(--shadow-card);
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	appearance: none;
+	overflow: hidden;
+}
+
+.delivery-card:active {
+	background: var(--color-accent-subtle);
+}
+
+.delivery-card-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.75rem;
+	flex-shrink: 0;
+	margin-bottom: 0.65rem;
+}
+
+.delivery-card-job {
+	font-weight: 700;
+	font-size: 1rem;
+	letter-spacing: -0.01em;
+	color: var(--color-text);
+}
+
+.delivery-card-address {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	margin-bottom: 0.65rem;
+}
+
+.delivery-card-address-name {
+	font-weight: 650;
+	font-size: 0.95rem;
+	line-height: 1.3;
+	color: var(--color-text);
+}
+
+.delivery-card-address-line {
+	font-size: 0.875rem;
+	line-height: 1.35;
+	color: var(--color-text-muted);
+	overflow-wrap: anywhere;
+}
+
+.delivery-card-times {
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+}
+
+.delivery-card-time {
+	display: grid;
+	grid-template-columns: 3.25rem 1fr;
+	gap: 0.5rem;
+	align-items: start;
+	font-size: 0.875rem;
+	line-height: 1.35;
+}
+
+.delivery-card-time-label {
+	color: var(--color-text-muted);
+	font-weight: 500;
+}
+
+.delivery-card-time-value {
+	color: var(--color-text);
+	min-width: 0;
+}
+
+.delivery-card-description-wrap {
+	position: relative;
+	margin-top: 0.75rem;
+	padding-top: 0.75rem;
+	border-top: 1px solid var(--color-border);
+	max-height: 5.5rem;
+	overflow: hidden;
+}
+
+.delivery-card-description {
+	margin: 0;
+	font-size: 0.875rem;
+	line-height: 1.4;
+	color: var(--color-text);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.delivery-card--clipped .delivery-card-description-wrap::after {
+	content: '';
+	position: absolute;
+	inset-inline: 0;
+	bottom: 0;
+	z-index: 1;
+	height: 2.5rem;
+	background: linear-gradient(
+		to bottom,
+		rgb(255 255 255 / 0),
+		var(--color-surface-raised) 100%
+	);
+	pointer-events: none;
+}
+
+.delivery-card--clipped:active .delivery-card-description-wrap::after {
+	background: linear-gradient(
+		to bottom,
+		rgb(244 235 244 / 0),
+		var(--color-accent-subtle) 100%
+	);
+}
+
 .tasks-cards-wrap {
 	flex: 1;
 	min-height: 0;
@@ -1515,6 +1711,19 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	background: rgb(180 40 40 / 90%);
 	font-size: 0.85rem;
 	line-height: 1.35;
+}
+
+.multi-shot-camera-status {
+	position: relative;
+	z-index: 2;
+	margin: 0.5rem 1rem 0;
+	padding: 0.65rem 0.85rem;
+	border-radius: var(--radius);
+	background: rgb(0 0 0 / 55%);
+	font-size: 0.85rem;
+	line-height: 1.35;
+	text-align: center;
+	color: rgb(255 255 255 / 90%);
 }
 
 .multi-shot-camera-fallback {

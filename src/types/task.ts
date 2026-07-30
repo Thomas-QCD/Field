@@ -22,12 +22,16 @@ export interface Task {
   status: TaskStatus;
   externalKey: string;
   contactNames: string;
+  destinationAddressName: string;
+  destinationStreet: string;
+  destinationBuilding: string;
   destinationAddress: string;
   crewName: string | null;
   windowStartAt: string | null;
   windowEndAt: string | null;
   description: string;
   createdByName: string;
+  cancelledAt: string | null;
 }
 
 export interface TaskCrewMember {
@@ -92,6 +96,7 @@ export interface TaskDetail {
   completedNotes: string | null;
   completedAt: string | null;
   failedReason: string | null;
+  cancelledAt: string | null;
   completionNotes: TaskCompletionNote[];
   completionNotesByName: string | null;
   createdAt: string;

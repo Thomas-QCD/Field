@@ -716,6 +716,34 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 /**
+ * Force-end every crew member who has started but not ended this task.
+ * Used when cancelling so in-progress crew are booted out.
+ *
+ * @param {import('pg').PoolClient} client
+ * @param {number} taskId
+ * @returns {Promise<number>} number of ended events inserted
+ */
+export async function endOpenCrewStarts(client, taskId) {
+  const { rowCount } = await client.query(
+    `INSERT INTO task_crew_events (task_id, user_id, event_type, recorded_at)
+     SELECT s.task_id, s.user_id, 'ended', now()
+     FROM task_crew_events s
+     WHERE s.task_id = $1
+       AND s.event_type = 'started'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM task_crew_events e
+         WHERE e.task_id = s.task_id
+           AND e.user_id = s.user_id
+           AND e.event_type = 'ended'
+       )
+     ON CONFLICT (task_id, user_id, event_type) DO NOTHING`,
+    [taskId],
+  );
+  return rowCount ?? 0;
+}
+
+/**
  * Log a per-crew start/end event and derive task status:
  * - First Start → In Progress (unless already In Progress / terminal)
  * - Start on Completed → reopen to In Progress (clears that user's end + note)
@@ -1177,6 +1205,23 @@ export async function updateTaskStatus(taskId, body) {
          WHERE id = $1
          RETURNING id, status, completed_at, completed_notes, failed_reason`,
         [taskId, status],
+      ));
+    } else if (status === "Cancelled") {
+      ({ rows } = await client.query(
+        `UPDATE tasks
+         SET status_before_cancel = CASE
+               WHEN status = 'Cancelled'::task_status THEN status_before_cancel
+               ELSE status
+             END,
+             cancelled_at = CASE
+               WHEN status = 'Cancelled'::task_status THEN cancelled_at
+               ELSE NOW()
+             END,
+             status = 'Cancelled'::task_status,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING id, status, completed_at, completed_notes, failed_reason`,
+        [taskId],
       ));
     } else if (status === "In Progress") {
       ({ rows } = await client.query(

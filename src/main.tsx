@@ -11,6 +11,7 @@ import './styles/tasks.css';
 import { theme } from './theme';
 import App from './App';
 import { initAndroidBackButton } from './androidBack';
+import './largeFont';
 
 // CSS file themes (ag-theme-quartz) — keep legacy theming vs Theming API default.
 provideGlobalGridOptions({ theme: 'legacy' });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
 	Alert,
 	Button,
@@ -16,7 +16,13 @@ import { Columns3, Plus } from 'lucide-react';
 import type { GridApi, RowClickedEvent } from 'ag-grid-community';
 import { AllCommunityModule } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
-import { createTask, deleteTask, listTasks, updateTask } from '../api/tasks';
+import {
+	createTask,
+	deleteTask,
+	listTasks,
+	restoreTask,
+	updateTask,
+} from '../api/tasks';
 import { uploadAttachment } from '../api/attachments';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
@@ -44,6 +50,11 @@ const STATUS_TABS = [
 	{ value: 'completed', label: 'Completed', statuses: ['Completed'] },
 	{ value: 'failed', label: 'Failed', statuses: ['Failed'] },
 	{
+		value: 'undetermined',
+		label: 'Undetermined',
+		statuses: ['Undetermined'],
+	},
+	{
 		value: 'upcoming',
 		label: 'Upcoming',
 		statuses: ['Unassigned', 'Assigned', 'Loaded'],
@@ -67,12 +78,11 @@ const DAY_FILTER_OPTIONS = [
 
 type DayFilterValue = (typeof DAY_FILTER_OPTIONS)[number]['value'];
 
-function matchesStatusTab(
-	status: TaskStatus,
-	tab: StatusTabValue,
-): boolean {
+function matchesStatusTab(status: TaskStatus, tab: StatusTabValue): boolean {
 	const entry = STATUS_TABS.find((t) => t.value === tab);
-	return entry ? (entry.statuses as readonly TaskStatus[]).includes(status) : false;
+	return entry
+		? (entry.statuses as readonly TaskStatus[]).includes(status)
+		: false;
 }
 
 function toDateTimeLocal(iso: string | null): string {
@@ -167,10 +177,11 @@ function parseDayKey(key: string): Date {
 export function TasksPage({
 	mode = 'all',
 }: {
-	mode?: 'all' | 'mine' | 'delivery';
+	mode?: 'all' | 'mine';
 }) {
 	const { user } = useCurrentUser();
 	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const isMobile = useMediaQuery(AG_GRID_MOBILE_MQ);
 	const [newTaskOpen, setNewTaskOpen] = useState(false);
 	const [editingTask, setEditingTask] = useState<TaskDetail | null>(null);
@@ -187,15 +198,27 @@ export function TasksPage({
 	);
 	const gridApiRef = useRef<GridApi<Task> | null>(null);
 
+	const dayFromQuery = useMemo(() => {
+		if (mode !== 'mine') return null;
+		const raw = searchParams.get('day');
+		if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+		return raw;
+	}, [mode, searchParams]);
+
 	const defaultColDef = useMemo(() => getDefaultColDef(isMobile), [isMobile]);
 
 	const columnDefs = useMemo(
 		() =>
 			getTaskColumnDefs(
 				isMobile ? DEFAULT_VISIBLE_TASK_COLUMNS : visibleColumns,
+				{ showCancelledTtl: statusTab === 'cancelled' },
 			),
-		[isMobile, visibleColumns],
+		[isMobile, visibleColumns, statusTab],
 	);
+
+	useEffect(() => {
+		queueMicrotask(() => gridApiRef.current?.sizeColumnsToFit());
+	}, [statusTab, columnDefs]);
 
 	const toggleColumn = (field: TaskColumnField, checked: boolean) => {
 		const option = TASK_COLUMN_OPTIONS.find((o) => o.field === field);
@@ -216,8 +239,9 @@ export function TasksPage({
 			const key = dayKeyFromIso(task.windowStartAt);
 			if (key) keys.add(key);
 		}
+		if (dayFromQuery) keys.add(dayFromQuery);
 		return [...keys].sort();
-	}, [tasks, mode]);
+	}, [tasks, mode, dayFromQuery]);
 
 	useEffect(() => {
 		if (mode !== 'mine' || taskDayKeys.length === 0) {
@@ -225,33 +249,58 @@ export function TasksPage({
 			return;
 		}
 		setSelectedDayKey((prev) => {
+			if (dayFromQuery && taskDayKeys.includes(dayFromQuery)) {
+				return dayFromQuery;
+			}
 			if (prev && taskDayKeys.includes(prev)) return prev;
 			const todayKey = localDayKey(new Date());
 			if (taskDayKeys.includes(todayKey)) return todayKey;
 			return taskDayKeys[0] ?? null;
 		});
-	}, [mode, taskDayKeys]);
+	}, [mode, taskDayKeys, dayFromQuery]);
 
 	const showStatusTabs = !isMobile;
+	const useCardView = mode === 'mine' && Boolean(isMobile);
+	/** Mobile My Tasks uses day chips instead of All / Today / Tomorrow. */
+	const showDayFilter = !useCardView;
 
-	const visibleTasks = useMemo(() => {
+	/** Tasks in the current page scope (mode + day), before status-tab filter. */
+	const scopedTasks = useMemo(() => {
 		let next = tasks;
 		if (mode === 'all') {
 			next = next.filter((task) => task.taskType !== 'Delivery');
-		} else if (mode === 'delivery') {
-			next = next.filter((task) => task.taskType === 'Delivery');
 		}
-		if (showStatusTabs) {
-			next = next.filter((task) => matchesStatusTab(task.status, statusTab));
-		}
-		if (dayFilter === 'today' || dayFilter === 'tomorrow') {
+		if (useCardView && selectedDayKey) {
+			const day = parseDayKey(selectedDayKey);
+			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
+		} else if (dayFilter === 'today' || dayFilter === 'tomorrow') {
 			const day = new Date();
 			if (dayFilter === 'tomorrow') day.setDate(day.getDate() + 1);
 			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
 		}
-		if (mode === 'mine' && isMobile && selectedDayKey && dayFilter === 'all') {
-			const day = parseDayKey(selectedDayKey);
-			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
+		return next;
+	}, [tasks, mode, useCardView, selectedDayKey, dayFilter]);
+
+	const statusTabCounts = useMemo(() => {
+		const counts = {} as Record<StatusTabValue, number>;
+		for (const tab of STATUS_TABS) {
+			counts[tab.value] = 0;
+		}
+		for (const task of scopedTasks) {
+			for (const tab of STATUS_TABS) {
+				if (matchesStatusTab(task.status, tab.value)) {
+					counts[tab.value] += 1;
+					break;
+				}
+			}
+		}
+		return counts;
+	}, [scopedTasks]);
+
+	const visibleTasks = useMemo(() => {
+		let next = scopedTasks;
+		if (showStatusTabs) {
+			next = next.filter((task) => matchesStatusTab(task.status, statusTab));
 		}
 		if (mode === 'mine') {
 			next = [...next].sort(
@@ -259,17 +308,7 @@ export function TasksPage({
 			);
 		}
 		return next;
-	}, [
-		tasks,
-		mode,
-		isMobile,
-		selectedDayKey,
-		showStatusTabs,
-		statusTab,
-		dayFilter,
-	]);
-
-	const useCardView = mode === 'mine' && Boolean(isMobile);
+	}, [scopedTasks, showStatusTabs, statusTab, mode]);
 
 	const crewMemberId = mode === 'mine' ? (user?.id ?? null) : null;
 
@@ -326,7 +365,9 @@ export function TasksPage({
 
 		if (pendingFiles.length > 0) {
 			if (!user) {
-				throw new Error('Select a user in the sidebar before uploading attachments');
+				throw new Error(
+					'Select a user in the sidebar before uploading attachments',
+				);
 			}
 			for (const file of pendingFiles) {
 				await uploadAttachment(taskId, file, user.id);
@@ -361,6 +402,12 @@ export function TasksPage({
 		await refreshTasks();
 	};
 
+	const handleRestoreTask = async (task: TaskDetail) => {
+		await restoreTask(task.id);
+		setDetailTaskId(null);
+		await refreshTasks();
+	};
+
 	const handleCloseEditor = () => {
 		setNewTaskOpen(false);
 		setEditingTask(null);
@@ -382,9 +429,8 @@ export function TasksPage({
 		});
 	}, [editingTask]);
 
-	const pageTitle =
-		mode === 'mine' ? 'My Tasks' : mode === 'delivery' ? 'Delivery' : 'Tasks';
-	const canCreateTask = mode === 'all' || mode === 'delivery';
+	const pageTitle = mode === 'mine' ? 'My Tasks' : 'Tasks';
+	const canCreateTask = mode === 'all';
 
 	return (
 		<Box className='tasks-page'>
@@ -393,14 +439,16 @@ export function TasksPage({
 					{pageTitle}
 				</Title>
 				<Group gap='sm' wrap='nowrap'>
-					<SegmentedControl
-						value={dayFilter}
-						onChange={(value) => setDayFilter(value as DayFilterValue)}
-						data={[...DAY_FILTER_OPTIONS]}
-						radius='md'
-						color='brand'
-						aria-label='Filter tasks by start day'
-					/>
+					{showDayFilter ? (
+						<SegmentedControl
+							value={dayFilter}
+							onChange={(value) => setDayFilter(value as DayFilterValue)}
+							data={[...DAY_FILTER_OPTIONS]}
+							radius='md'
+							color='brand'
+							aria-label='Filter tasks by start day'
+						/>
+					) : null}
 					{!isMobile && mode !== 'mine' ? (
 						<Menu shadow='md' width={220} closeOnItemClick={false}>
 							<Menu.Target>
@@ -428,7 +476,7 @@ export function TasksPage({
 							</Menu.Dropdown>
 						</Menu>
 					) : null}
-					{canCreateTask ? (
+					{canCreateTask && !isMobile ? (
 						<Button
 							leftSection={<Plus size={18} />}
 							onClick={() => {
@@ -451,6 +499,7 @@ export function TasksPage({
 				>
 					{STATUS_TABS.map((tab) => {
 						const selected = tab.value === statusTab;
+						const count = statusTabCounts[tab.value];
 						return (
 							<button
 								key={tab.value}
@@ -461,7 +510,7 @@ export function TasksPage({
 								data-selected={selected || undefined}
 								onClick={() => setStatusTab(tab.value)}
 							>
-								{tab.label}
+								{tab.label} ({count})
 							</button>
 						);
 					})}
@@ -556,6 +605,7 @@ export function TasksPage({
 				onClose={() => setDetailTaskId(null)}
 				onEdit={handleEditTask}
 				onDelete={handleDeleteTask}
+				onRestore={handleRestoreTask}
 				onStatusChange={(updated) => {
 					setTasks((prev) =>
 						prev.map((t) =>

@@ -57,6 +57,10 @@ android/app/*.iml
 *.ap_
 *.dex
 
+# Android release signing (never commit)
+android/keystore.properties
+android/keystore/
+
 # Capacitor / iOS (keep ios/ tracked; ignore build junk)
 ios/App/Pods/
 ios/DerivedData/

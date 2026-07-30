@@ -14,7 +14,8 @@ function isLoopbackHost(hostname: string): boolean {
  *   ERR_CONTENT_LENGTH_MISMATCH on WebView)
  * - Bundled native Android: host loopback via 10.0.2.2
  * - Bundled native iOS simulator: Mac localhost
- * Override with VITE_API_BASE (e.g. http://192.168.1.10:3000) for a physical device.
+ * Override with VITE_API_BASE (e.g. http://192.168.1.10:3000 for a physical
+ * device against local API, or https://d….cloudfront.net via `npm run cap:staging`).
  */
 export function apiUrl(path: string): string {
 	const p = path.startsWith('/') ? path : `/${path}`;

@@ -15,7 +15,7 @@ import {
   getBearerToken,
 } from "./auth.mjs";
 import { getPool } from "./db.mjs";
-import { createCrewEvent, createTask, updateTask, updateTaskStatus, listCompletionNotes } from "./createTask.mjs";
+import { createCrewEvent, createTask, updateTask, updateTaskStatus, listCompletionNotes, endOpenCrewStarts } from "./createTask.mjs";
 import {
   activateMobileDevice,
   issueActivationCode,
@@ -24,6 +24,10 @@ import {
   revokeMobileDevice,
 } from "./mobileAuth.mjs";
 import { generateAndStoreDeliveryDocket } from "./deliveryDocket.mjs";
+import {
+  purgeExpiredCancelledTasks,
+  startCancelledTaskPurgeScheduler,
+} from "./purgeCancelledTasks.mjs";
 
 const PORT = Number(process.env.API_PORT) || 3000;
 
@@ -527,20 +531,115 @@ async function deleteAddress(id) {
 }
 
 /**
+ * Cancel a task (status → Cancelled). Soft-delete happens after 7 days.
+ * Boots any crew who have started but not ended.
  * @param {number} id
  */
-async function deleteTask(id) {
+async function cancelTask(id) {
   const pool = getPool();
-  const { rowCount } = await pool.query(
-    `UPDATE tasks
-     SET deleted_at = now(),
-         updated_at = now()
-     WHERE id = $1
-       AND deleted_at IS NULL`,
-    [id],
-  );
-  if (rowCount === 0) {
-    throw Object.assign(new Error("Task not found"), { status: 404 });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query(
+      `SELECT id, status
+       FROM tasks
+       WHERE id = $1
+         AND deleted_at IS NULL
+       FOR UPDATE`,
+      [id],
+    );
+    if (existing.rowCount === 0) {
+      throw Object.assign(new Error("Task not found"), { status: 404 });
+    }
+    if (existing.rows[0].status === "Cancelled") {
+      throw Object.assign(new Error("Task is already cancelled"), {
+        status: 409,
+      });
+    }
+
+    await endOpenCrewStarts(client, id);
+
+    const { rowCount } = await client.query(
+      `UPDATE tasks
+       SET status_before_cancel = status,
+           status = 'Cancelled'::task_status,
+           cancelled_at = now(),
+           updated_at = now()
+       WHERE id = $1
+         AND deleted_at IS NULL
+         AND status <> 'Cancelled'::task_status`,
+      [id],
+    );
+    if (rowCount === 0) {
+      throw Object.assign(new Error("Task not found"), { status: 404 });
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // ignore rollback errors
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Restore a cancelled task as Undetermined (within the 7-day window).
+ * @param {number} id
+ */
+async function restoreTask(id) {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query(
+      `SELECT id, status
+       FROM tasks
+       WHERE id = $1
+         AND deleted_at IS NULL
+       FOR UPDATE`,
+      [id],
+    );
+    if (existing.rowCount === 0) {
+      throw Object.assign(new Error("Task not found"), { status: 404 });
+    }
+    if (existing.rows[0].status !== "Cancelled") {
+      throw Object.assign(new Error("Task is not cancelled"), { status: 409 });
+    }
+
+    const { rows } = await client.query(
+      `UPDATE tasks
+       SET status = 'Undetermined'::task_status,
+           completed_at = COALESCE(completed_at, now()),
+           cancelled_at = NULL,
+           status_before_cancel = NULL,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING id, status`,
+      [id],
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      id: Number(rows[0].id),
+      status: rows[0].status,
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // ignore rollback errors
+    }
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
@@ -613,6 +712,8 @@ async function listCrewLocations() {
  * @param {{ crewMemberId?: string | null }} [opts]
  */
 async function listTasks(opts = {}) {
+  await purgeExpiredCancelledTasks();
+
   const pool = getPool();
   const crewMemberId =
     typeof opts.crewMemberId === "string" && opts.crewMemberId.trim()
@@ -639,6 +740,7 @@ async function listTasks(opts = {}) {
        t.description,
        t.window_start_at,
        t.window_end_at,
+       t.cancelled_at,
        cu.display_name AS created_by_name,
        (
          SELECT string_agg(c.name, ', ' ORDER BY tc.is_poc DESC, c.name)
@@ -646,6 +748,9 @@ async function listTasks(opts = {}) {
          JOIN contacts c ON c.id = tc.contact_id
          WHERE tc.task_id = t.id
        ) AS contact_names,
+       COALESCE(a.address_name, '') AS destination_address_name,
+       COALESCE(a.street_line, '') AS destination_street,
+       COALESCE(a.building, '') AS destination_building,
        CASE
          WHEN a.id IS NULL THEN ''
          WHEN a.address_name IS NOT NULL AND a.address_name <> ''
@@ -676,6 +781,9 @@ async function listTasks(opts = {}) {
     externalKey: row.external_key ?? "",
     description: row.description ?? "",
     contactNames: row.contact_names ?? "",
+    destinationAddressName: row.destination_address_name ?? "",
+    destinationStreet: row.destination_street ?? "",
+    destinationBuilding: row.destination_building ?? "",
     destinationAddress: row.destination_address ?? "",
     crewName: row.crew_name ?? null,
     createdByName: row.created_by_name ?? "",
@@ -684,6 +792,9 @@ async function listTasks(opts = {}) {
       : null,
     windowEndAt: row.window_end_at
       ? new Date(row.window_end_at).toISOString()
+      : null,
+    cancelledAt: row.cancelled_at
+      ? new Date(row.cancelled_at).toISOString()
       : null,
   }));
 }
@@ -709,6 +820,7 @@ async function getTask(id) {
        t.completed_notes,
        t.completed_at,
        t.failed_reason,
+       t.cancelled_at,
        t.created_at,
        t.updated_at,
        t.destination_address_id,
@@ -819,6 +931,9 @@ async function getTask(id) {
       ? new Date(row.completed_at).toISOString()
       : null,
     failedReason: row.failed_reason ?? null,
+    cancelledAt: row.cancelled_at
+      ? new Date(row.cancelled_at).toISOString()
+      : null,
     completionNotes,
     completionNotesByName:
       completionNotes.length > 0
@@ -1114,6 +1229,13 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    const taskRestoreMatch = url.pathname.match(/^\/api\/tasks\/(\d+)\/restore$/);
+    if (req.method === "POST" && taskRestoreMatch) {
+      const task = await restoreTask(Number(taskRestoreMatch[1]));
+      sendJson(res, { task });
+      return;
+    }
+
     const crewEventsMatch = url.pathname.match(
       /^\/api\/tasks\/(\d+)\/crew-events$/,
     );
@@ -1142,7 +1264,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "DELETE" && taskMatch) {
-      await deleteTask(Number(taskMatch[1]));
+      await cancelTask(Number(taskMatch[1]));
       sendNoContent(res);
       return;
     }
@@ -1204,4 +1326,5 @@ server.listen(PORT, () => {
     ? "Entra ID JWT required"
     : "stub (no JWT)";
   console.log(`Field API listening on http://localhost:${PORT} — auth: ${authMode}`);
+  startCancelledTaskPurgeScheduler();
 });

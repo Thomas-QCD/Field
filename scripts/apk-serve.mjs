@@ -2,7 +2,7 @@
  * Build a standard bundled Android debug APK (no live-reload URL)
  * and serve it over LAN for sideload download.
  *
- * Usage: npm run apk:serve
+ * Usage: node scripts/apk-serve.mjs
  * Output: dist-apk/field.apk
  * Download: http://<lan-ip>:8765/field.apk
  *

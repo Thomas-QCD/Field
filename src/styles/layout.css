@@ -12,6 +12,25 @@ html {
 	-webkit-text-size-adjust: 100%;
 }
 
+/* Larger text (More → settings): base + Mantine scale floored at 20px. */
+html.field-large-font {
+	font-size: 20px;
+	--mantine-font-size-xs: 20px;
+	--mantine-font-size-sm: 20px;
+	--mantine-font-size-md: 20px;
+	--mantine-font-size-lg: 20px;
+	--mantine-font-size-xl: 24px;
+	--ag-font-size: 20px;
+}
+
+html.field-large-font body {
+	font-size: 20px;
+}
+
+html.field-large-font .field-bottom-nav-item {
+	font-size: 20px;
+}
+
 /* Portaled modals read these from :root (AppShell vars stay on .field-app-shell). */
 :root {
 	--field-shell-header: 0px;
@@ -83,7 +102,8 @@ body {
 
 .field-bottom-nav-inner {
 	display: grid;
-	grid-template-columns: repeat(5, 1fr);
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
 	height: 100%;
 	width: 100%;
 }

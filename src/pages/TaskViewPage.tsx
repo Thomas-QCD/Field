@@ -22,6 +22,7 @@ import { MultiShotCamera } from '../components/MultiShotCamera';
 import { TaskAttachments } from '../components/TaskAttachments';
 import { TaskStatusBadge } from '../components/TaskStatusBadge';
 import { useCurrentUser } from '../context/CurrentUserContext';
+import { getDeliveryMode } from '../deliveryMode';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
@@ -558,7 +559,7 @@ export function TaskViewPage() {
 	const goBack = () => {
 		// First load / deep link has no in-app history to pop.
 		if (location.key === 'default') {
-			navigate('/my-tasks');
+			navigate(getDeliveryMode() ? '/delivery' : '/my-tasks');
 			return;
 		}
 		navigate(-1);

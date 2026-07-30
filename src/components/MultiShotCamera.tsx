@@ -37,6 +37,26 @@ const MAX_SHOTS = 30;
 const JPEG_QUALITY = 0.85;
 const NATIVE_CAPTURE_QUALITY = 85;
 const ACTIVE_CLASS = 'multi-shot-camera-active';
+/** CameraPreview.start can hang on some Android devices (esp. TextureView). */
+const NATIVE_START_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = window.setTimeout(() => {
+			reject(new Error(message));
+		}, ms);
+		promise.then(
+			(value) => {
+				window.clearTimeout(timer);
+				resolve(value);
+			},
+			(err: unknown) => {
+				window.clearTimeout(timer);
+				reject(err);
+			},
+		);
+	});
+}
 
 async function ensureCameraPermission(): Promise<void> {
 	if (!Capacitor.isNativePlatform()) return;
@@ -50,25 +70,42 @@ async function ensureCameraPermission(): Promise<void> {
 	}
 }
 
-/** Full-bleed preview behind the WebView; Android system bars are masked natively. */
-async function startNativePreview(): Promise<void> {
-	await CameraPreview.start({
-		position: 'rear',
-		toBack: true,
-		disableAudio: true,
-		// TextureView composites in the normal view stack so MainActivity's
-		// black system-bar covers can sit on top. SurfaceView punches through.
-		enableOpacity: true,
-		x: 0,
-		y: 0,
-		width: Math.round(window.innerWidth),
-		height: Math.round(window.innerHeight),
-	});
-	try {
-		await CameraPreview.setOpacity({ opacity: 1 });
-	} catch {
-		// Older plugin builds may lack setOpacity; preview still starts.
+async function startWebPreview(): Promise<MediaStream> {
+	const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(
+		navigator.mediaDevices,
+	);
+	if (!getUserMedia) {
+		throw new Error('Camera is not available in this browser');
 	}
+	return getUserMedia({
+		audio: false,
+		video: {
+			facingMode: { ideal: 'environment' },
+			width: { ideal: 1920 },
+			height: { ideal: 1440 },
+		},
+	});
+}
+
+/**
+ * Full-bleed preview behind the WebView. Use SurfaceView (no enableOpacity):
+ * TextureView + enableOpacity has hung start() on installed Android builds,
+ * leaving the shutter disabled with no error.
+ */
+async function startNativePreview(): Promise<void> {
+	await withTimeout(
+		CameraPreview.start({
+			position: 'rear',
+			toBack: true,
+			disableAudio: true,
+			x: 0,
+			y: 0,
+			width: Math.round(window.innerWidth),
+			height: Math.round(window.innerHeight),
+		}),
+		NATIVE_START_TIMEOUT_MS,
+		'Camera preview timed out — try again or use the library',
+	);
 }
 
 function stampName(): string {
@@ -333,10 +370,33 @@ export function MultiShotCamera({
 	useEffect(() => {
 		let cancelled = false;
 
+		const attachWebStream = async (stream: MediaStream) => {
+			if (cancelled) {
+				for (const track of stream.getTracks()) track.stop();
+				return;
+			}
+			streamRef.current = stream;
+			setMode('web');
+		};
+
 		const start = async () => {
 			try {
 				await ensureCameraPermission();
 				if (cancelled) return;
+
+				// Prefer getUserMedia when the WebView exposes it (HTTPS / Capacitor
+				// secure origins). Avoids CameraPreview start hangs that leave the
+				// shutter disabled with no error on installed Android builds.
+				if (typeof navigator.mediaDevices?.getUserMedia === 'function') {
+					try {
+						const stream = await startWebPreview();
+						await attachWebStream(stream);
+						return;
+					} catch {
+						// Fall through to CameraPreview on native; rethrow on web.
+						if (!Capacitor.isNativePlatform()) throw new Error('Camera is not available');
+					}
+				}
 
 				if (Capacitor.isNativePlatform()) {
 					// Set native mode first so the empty <video> placeholder never mounts.
@@ -353,28 +413,7 @@ export function MultiShotCamera({
 					return;
 				}
 
-				const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(
-					navigator.mediaDevices,
-				);
-				if (!getUserMedia) {
-					throw new Error('Camera is not available in this browser');
-				}
-
-				const stream = await getUserMedia({
-					audio: false,
-					video: {
-						facingMode: { ideal: 'environment' },
-						width: { ideal: 1920 },
-						height: { ideal: 1440 },
-					},
-				});
-				if (cancelled) {
-					for (const track of stream.getTracks()) track.stop();
-					return;
-				}
-
-				streamRef.current = stream;
-				setMode('web');
+				throw new Error('Camera is not available in this browser');
 			} catch (err: unknown) {
 				if (cancelled) return;
 				setNativeOverlayActive(false);
@@ -561,6 +600,10 @@ export function MultiShotCamera({
 			{error ? (
 				<p className='multi-shot-camera-error' role='alert'>
 					{error}
+				</p>
+			) : !ready ? (
+				<p className='multi-shot-camera-status' role='status'>
+					Starting camera…
 				</p>
 			) : null}
 

@@ -72,13 +72,50 @@ Also add SPA redirect URI `https://d….cloudfront.net` in the Entra app registr
 
 Without the API `AZURE_*` values, Microsoft sign-in appears to work but `/api/auth/session` fails and My Tasks shows “Select a user”.
 
-## Mobile later
+## Mobile (Capacitor → staging API)
 
-Bundled Capacitor against staging:
+Bundled Cap builds default to the host loopback API (`10.0.2.2:3000` / `127.0.0.1:3000`). To dogfood against staging instead:
 
 ```bash
-VITE_API_BASE=https://dxxxx.cloudfront.net npm run cap:sync
+npm run cap:staging
+# or open the IDE after sync:
+npm run cap:staging -- --open android
 ```
+
+This reads `/field/staging/url` from SSM, builds with `VITE_API_BASE` set to that HTTPS origin, clears Cap live-reload, and runs `npx cap sync`.
+
+**Do not** follow with `npm run cap:android` / `cap:ios` — those re-run `cap:sync` without `VITE_API_BASE` and point the app back at the local API. Use `npx cap open android` / `ios` after `cap:staging`.
+
+Smoke:
+
+1. Staging web (`/field/staging/url`) → Users → Issue QR for a crew user
+2. Install the Cap build on a device/emulator → activate (scan or paste `field1.…`)
+3. List assigned tasks, update status, upload a photo
+4. Web → revoke device → next API call clears the session → QR gate again
+
+Attachment uploads use the same S3 bucket; Cap origins are already in CORS (`capacitor://localhost`, `https://localhost`). Re-run `npm run s3:cors` if uploads fail.
+
+Live reload (`cap:live`) still uses the local Vite/API — only `cap:staging` (or a manual `VITE_API_BASE=… npm run cap:sync`) targets CloudFront.
+
+### Signed release APK (sideload)
+
+One-time keystore (do not commit; back up the `.jks` + password):
+
+```bash
+FIELD_KEYSTORE_PASSWORD='choose-a-strong-password' npm run android:keystore
+```
+
+Build a signed release APK aimed at staging (HTTPS only, WebView debug off):
+
+```bash
+npm run apk:staging
+# or build + LAN download page:
+npm run apk:staging -- --serve
+```
+
+Output: `dist-apk/field-staging.apk`. Optional version bumps: `FIELD_VERSION_CODE=2 FIELD_VERSION_NAME=1.0.1 npm run apk:staging`.
+
+Debug sideload against the **local** API remains `npm run apk:serve` (unsigned debug APK).
 
 ## Custom domain later
 
@@ -93,4 +130,7 @@ Add an alternate domain + ACM certificate on the **same** CloudFront distributio
 | `npm run infra:deploy` | Deploy/update stack (**creates AWS resources**) |
 | `npm run api:staging` | Docker build/push + ECS desiredCount=1 |
 | `npm run web:staging` | `vite build` → S3 sync → CF invalidation |
+| `npm run cap:staging` | Build Cap web bundle with staging `VITE_API_BASE` + `cap sync` |
+| `npm run android:keystore` | One-time release keystore + `keystore.properties` |
+| `npm run apk:staging` | Signed release APK → staging (`dist-apk/field-staging.apk`) |
 | `npm run s3:cors` | Refresh attachments CORS (includes staging URL when SSM exists) |

@@ -19,7 +19,7 @@ import {
 	Pencil,
 	Printer,
 	RefreshCw,
-	Trash2,
+	Ban,
 } from 'lucide-react';
 import { getTask, openDeliveryDocket, updateTaskStatus } from '../api/tasks';
 import { useCurrentUser } from '../context/CurrentUserContext';
@@ -36,6 +36,7 @@ interface TaskDetailModalProps {
 	onClose: () => void;
 	onEdit?: (task: TaskDetail) => void;
 	onDelete?: (task: TaskDetail) => Promise<void>;
+	onRestore?: (task: TaskDetail) => Promise<void>;
 	onStatusChange?: (task: { id: number; status: TaskStatus }) => void;
 }
 
@@ -138,6 +139,7 @@ export function TaskDetailModal({
 	onClose,
 	onEdit,
 	onDelete,
+	onRestore,
 	onStatusChange,
 }: TaskDetailModalProps) {
 	const { user } = useCurrentUser();
@@ -294,7 +296,9 @@ export function TaskDetailModal({
 		const label = task.externalKey
 			? `#${task.externalKey}`
 			: `task #${task.id}`;
-		if (!window.confirm(`Delete ${label}?`)) return;
+		if (!window.confirm(`Cancel ${label}?`)) {
+			return;
+		}
 		setActionBusy(true);
 		setActionError(null);
 		setActionNotice(null);
@@ -302,7 +306,22 @@ export function TaskDetailModal({
 			await onDelete(task);
 		} catch (err: unknown) {
 			setActionError(
-				err instanceof Error ? err.message : 'Failed to delete task',
+				err instanceof Error ? err.message : 'Failed to cancel task',
+			);
+			setActionBusy(false);
+		}
+	};
+
+	const handleRestore = async () => {
+		if (!task || !onRestore) return;
+		setActionBusy(true);
+		setActionError(null);
+		setActionNotice(null);
+		try {
+			await onRestore(task);
+		} catch (err: unknown) {
+			setActionError(
+				err instanceof Error ? err.message : 'Failed to restore task',
 			);
 			setActionBusy(false);
 		}
@@ -401,6 +420,18 @@ export function TaskDetailModal({
 				<>
 					<div className='task-detail-scroll'>
 						<Stack gap='lg'>
+							{task.status === 'Cancelled' && task.cancelledAt ? (
+								<Alert color='orange' title='Cancelled'>
+									Scheduled for permanent removal on{' '}
+									{formatDateTime(
+										new Date(
+											new Date(task.cancelledAt).getTime() +
+												7 * 24 * 60 * 60 * 1000,
+										).toISOString(),
+									)}
+									.
+								</Alert>
+							) : null}
 							<div className='task-detail-layout'>
 								<div className='task-detail-main'>
 									<Stack gap='lg'>
@@ -478,8 +509,7 @@ export function TaskDetailModal({
 														<p className='task-detail-completion-notes'>
 															{task.completedNotes!.trim()}
 														</p>
-														{task.completedAt ||
-														task.completionNotesByName ? (
+														{task.completedAt || task.completionNotesByName ? (
 															<p className='task-detail-completion-meta'>
 																Completed
 																{task.completedAt
@@ -525,9 +555,7 @@ export function TaskDetailModal({
 												value={
 													task.crewMembers.length
 														? task.crewMembers
-																.map((m) =>
-																	formatShortName(m.displayName),
-																)
+																.map((m) => formatShortName(m.displayName))
 																.join(', ')
 														: 'Unassigned'
 												}
@@ -638,9 +666,7 @@ export function TaskDetailModal({
 												<DetailField
 													label='Guys'
 													value={
-														task.crewSize != null
-															? String(task.crewSize)
-															: ''
+														task.crewSize != null ? String(task.crewSize) : ''
 													}
 												/>
 												<DetailField
@@ -700,11 +726,7 @@ export function TaskDetailModal({
 						) : null}
 
 						<Group justify='space-between' gap='xs' wrap='nowrap'>
-							<Button
-								variant='default'
-								onClick={onClose}
-								disabled={actionBusy}
-							>
+							<Button variant='default' onClick={onClose} disabled={actionBusy}>
 								Close
 							</Button>
 							<Group gap='xs' wrap='nowrap'>
@@ -762,15 +784,27 @@ export function TaskDetailModal({
 												))}
 											</Menu.Sub.Dropdown>
 										</Menu.Sub>
-										{onDelete ? (
+										{task.status === 'Cancelled' ? (
+											onRestore ? (
+												<>
+													<Menu.Divider />
+													<Menu.Item
+														leftSection={<RefreshCw size={16} />}
+														onClick={() => void handleRestore()}
+													>
+														Restore task
+													</Menu.Item>
+												</>
+											) : null
+										) : onDelete ? (
 											<>
 												<Menu.Divider />
 												<Menu.Item
 													color='red'
-													leftSection={<Trash2 size={16} />}
+													leftSection={<Ban size={16} />}
 													onClick={() => void handleDelete()}
 												>
-													Delete task
+													Cancel task
 												</Menu.Item>
 											</>
 										) : null}

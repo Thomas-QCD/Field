@@ -101,12 +101,14 @@ function TaskCard({
 export function TaskCards({
 	tasks,
 	onSelect,
+	emptyMessage = 'No tasks for this day.',
 }: {
 	tasks: Task[];
 	onSelect: (taskId: number) => void;
+	emptyMessage?: string;
 }) {
 	if (tasks.length === 0) {
-		return <p className='task-cards-empty'>No tasks for this day.</p>;
+		return <p className='task-cards-empty'>{emptyMessage}</p>;
 	}
 
 	return (

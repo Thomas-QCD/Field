@@ -1533,7 +1533,6 @@ async function main() {
     await client.query(`DELETE FROM task_attachments`);
     await client.query(`DELETE FROM task_documents`);
     await client.query(`DELETE FROM email_deliveries`);
-    await client.query(`DELETE FROM task_status_events`);
     await client.query(`DELETE FROM task_crew_events`);
     // CASCADE children + tasks
     await client.query(`DELETE FROM tasks`);

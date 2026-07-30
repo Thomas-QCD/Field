@@ -29,6 +29,7 @@ import {
 	Plus,
 	Paperclip,
 	Trash2,
+	Search,
 } from 'lucide-react';
 import type { TaskType } from '../types/task';
 import {
@@ -501,7 +502,8 @@ export function NewTaskModal({
 					/>
 					<TextInput
 						size={inputSize}
-						placeholder='Job Number'
+						placeholder='Search task'
+						leftSection={<Search size={16} />}
 						value={form.externalKey}
 						onChange={(e) => update('externalKey', e.currentTarget.value)}
 						maxLength={100}

@@ -9,7 +9,7 @@ Normalized relational schema for Field, derived from the flat task export in [`t
 - **Relational database** — PostgreSQL (local Docker in dev; RDS on AWS in production).
 - **Primary keys** — `bigint` identity for internal entities; `uuid` for users (Entra `oid` mapped to UUID for web-authenticated users).
 - **Timestamps** — `timestamptz` stored in UTC.
-- **Coordinates** — `numeric` latitude/longitude on `addresses` (destination). Crew start/end geotags live on `task_crew_events` (nullable lat/lng + accuracy). Optional geo on `task_status_events` for status-change audit.
+- **Coordinates** — `numeric` latitude/longitude on `addresses` (destination). Crew start/end geotags live on `task_crew_events` (nullable lat/lng + accuracy).
 - **No teams** — company-local workforce; tasks are assigned to individual **crew members** only. Reference `AssignedToTeamId` is ignored. Field does not use the word "driver".
 - **Task type / status** — PostgreSQL enums (`task_type`, `task_status`) stored as text labels on `tasks` (e.g. `Delivery`, `Loaded`). No FK from `tasks` to lookup tables.
 - **No dispatch address** — destination only; `dispatch_address_id` is not modeled.
@@ -30,11 +30,8 @@ erDiagram
     tasks ||--o{ task_contacts : "has contacts"
     addresses ||--o| tasks : "destination"
 
-    task_statuses ||--o{ task_status_events : "logged as"
-    tasks ||--o{ task_status_events : "history"
     tasks ||--o{ task_attachments : "has"
 
-    users ||--o{ task_status_events : "changed by"
     users ||--o{ task_crew_events : "starts/ends"
     tasks ||--o{ task_crew_events : "crew check-ins"
     users ||--o{ task_attachments : "uploaded by"
@@ -49,9 +46,8 @@ erDiagram
 | Identity & access | `users`, `mobile_activation_codes`, `mobile_devices` | Web auth (Entra ID); mobile QR activation + device sessions |
 | Locations | `addresses` | Job-site destinations with optional `address_name`; optional link from tasks |
 | Contacts | `contacts` | People (name, title, phone, email) — not venues |
-| Task reference data | `task_types`, `task_statuses`, `task_status_transitions` | Optional lookup / workflow metadata (tasks store enums directly) |
 | Core | `tasks`, `task_crew_members`, `task_contacts` | Primary unit of work; crew + contacts + optional destination |
-| Task extensions | `task_attachments`, `task_crew_events`, `task_status_events`, `task_documents`, `email_deliveries` | Photos, crew start/end logs, status audit, PDFs, outbound email log |
+| Task extensions | `task_attachments`, `task_crew_events`, `task_documents`, `email_deliveries` | Photos, crew start/end logs, PDFs, outbound email log |
 
 ---
 
@@ -225,63 +221,22 @@ Lambda source: [`aws/lambdas/`](../aws/lambdas/). Dual-write keeps DynamoDB `WOO
 
 ---
 
-## Task Reference Data
+## Status workflow (application layer)
 
-Optional lookup tables for labels/sort order and transition rules. **`tasks` does not FK to these** — current type/status live as enums on the row.
-
-### `task_types`
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `smallint` | PK |
-| `code` | `varchar(50)` | UNIQUE, NOT NULL |
-| `name` | `varchar(100)` | NOT NULL |
-| `sort_order` | `smallint` | NOT NULL DEFAULT 0 |
-
-**Seed data (from reference):**
-
-| code | name |
-|------|------|
-| `delivery` | Delivery |
-| `install` | Install |
-| `removal` | Removal |
-| `site_survey` | Site Survey |
-| `other` | Other |
-
-### `task_statuses`
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `smallint` | PK |
-| `code` | `varchar(50)` | UNIQUE, NOT NULL |
-| `name` | `varchar(100)` | NOT NULL |
-| `sort_order` | `smallint` | NOT NULL DEFAULT 0 |
-| `is_terminal` | `boolean` | NOT NULL DEFAULT false |
-
-**Seed data:** same labels as the `task_status` enum (`created` → `Created`, etc.).
-
-### `task_status_transitions`
-
-Allowed workflow edges. Enforce in application layer (or DB trigger) when status changes.
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `from_status_id` | `smallint` | PK, FK → `task_statuses.id` |
-| `to_status_id` | `smallint` | PK, FK → `task_statuses.id` |
-
-**Draft transition graph** (confirm with business):
+Type and status live as PostgreSQL enums on `tasks` — no lookup tables. Allowed transitions are enforced in application code (not DB tables). Draft graph (confirm with business):
 
 ```text
-created → unassigned | assigned
 unassigned → assigned
 assigned → loaded | failed
 loaded → in_progress | failed
-in_progress → completed | failed
+in_progress → completed | failed | undetermined
 completed → (terminal)
 failed → (terminal)
+any (via DELETE) → cancelled
+cancelled → Undetermined (restore within 7 days) | soft-deleted after 7 days
 ```
 
-Adjust when real workflow rules are confirmed.
+Crew start/end timeline is `task_crew_events` (derives In Progress / Completed). Status history audit via a dedicated events table was dropped as unused; reintroduce later if needed.
 
 ---
 
@@ -307,11 +262,13 @@ Central table. Contacts and crew are junction tables; destination is an optional
 | `completed_notes` | `text` | nullable | `CompletedNotes` |
 | `completed_at` | `timestamptz` | nullable | `CompletedDateTime` |
 | `failed_reason` | `text` | nullable | `TaskFailedReason` |
+| `cancelled_at` | `timestamptz` | nullable | Set when status becomes `Cancelled`; used for 7-day purge |
+| `status_before_cancel` | `task_status` | nullable | Prior status at cancel time (audit); restore always sets `Undetermined` |
 | `deleted_at` | `timestamptz` | nullable | Soft delete — null = active |
 | `created_at` | `timestamptz` | NOT NULL | `CreatedDateTime` |
 | `updated_at` | `timestamptz` | NOT NULL | `ModifiedDateTime` |
 
-**Soft delete:** `DELETE` API sets `deleted_at = now()`. Lists and detail GET require `deleted_at IS NULL`. Junction rows and destination FKs are left in place for history.
+**Cancel / soft delete:** `DELETE /api/tasks/:id` sets `status = Cancelled` and `cancelled_at` (does not set `deleted_at`), and force-ends any open crew starts. Tasks remain visible under the Cancelled filter for 7 days and can be restored via `POST /api/tasks/:id/restore` (restores as `Undetermined`). After 7 days, a purge job sets `deleted_at = now()`. Lists and detail GET require `deleted_at IS NULL`. Junction rows and destination FKs are left in place for history.
 
 **Constraints:**
 
@@ -323,6 +280,7 @@ Central table. Contacts and crew are junction tables; destination is an optional
 - `(destination_address_id)`
 - `(external_key)` where not null
 - `(created_at DESC)`
+- `(cancelled_at)` where `status = Cancelled` and `deleted_at IS NULL` — purge window
 
 **Crew assignment:** 0..many via `task_crew_members` (API/form: `crewMemberIds: string[]`).
 
@@ -445,28 +403,6 @@ Append-only per-crew start/end check-in log (one `started` and one `ended` per u
 
 **Migration:** [`019_task_crew_events.sql`](../db/migrations/019_task_crew_events.sql)
 
-### `task_status_events`
-
-Append-only audit log for status changes (and optional assignment changes). Nullable geo columns for GPS at a status change if recorded. Crew start/end location belongs on `task_crew_events`. Compare destination coords via `tasks.destination_address_id` in the application (Haversine; PostGIS optional later).
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | `bigint` | PK |
-| `task_id` | `bigint` | FK → `tasks.id`, NOT NULL |
-| `from_status_id` | `smallint` | FK → `task_statuses.id`, nullable |
-| `to_status_id` | `smallint` | FK → `task_statuses.id`, NOT NULL |
-| `changed_by_user_id` | `uuid` | FK → `users.id`, nullable | system if null |
-| `notes` | `text` | nullable | |
-| `latitude` | `numeric(10,7)` | nullable | GPS at this status change |
-| `longitude` | `numeric(10,7)` | nullable | GPS at this status change |
-| `accuracy_meters` | `numeric(8,2)` | nullable | device-reported fix accuracy |
-| `recorded_at` | `timestamptz` | nullable | client capture time if different from `created_at` |
-| `created_at` | `timestamptz` | NOT NULL | |
-
-**Index:** `(task_id, created_at)`
-
-**Migration:** [`018_task_status_events_geotag.sql`](../db/migrations/018_task_status_events_geotag.sql)
-
 ---
 
 ## Flat → Relational Mapping
@@ -496,7 +432,6 @@ Append-only audit log for status changes (and optional assignment changes). Null
 | Generated PDFs | `task_documents` — `shipping_label`, `delivery_docket`, `pod` |
 | Automatic emails | `email_deliveries` |
 | Crew start/end time + geotags | `task_crew_events` |
-| Status history | `task_status_events` |
 
 ---
 
@@ -548,6 +483,8 @@ interface TaskReadModel {
 | `teams` / `team_members` | **Out of scope** — company-local; crew-member assignment only |
 | `task_line_items` | Deferred — materials embedded in `TaskDesc` today |
 | `recipient_emails` | **Removed** — single `contacts.email` column |
+| `task_types` / `task_statuses` / `task_status_transitions` | **Removed** — enums on `tasks` are source of truth ([`027`](../db/migrations/027_drop_abandoned_lookup_tables.sql)) |
+| `task_status_events` | **Removed** — never wired; crew timeline is `task_crew_events` |
 | `task_failure_reasons` | Deferred — free-text `failed_reason` sufficient for MVP |
 | `user_roles` | Deferred — single `role` column on `users` until multi-role is required |
 
@@ -564,9 +501,6 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | `mobile_devices` | Yes — durable sessions + remote revoke |
 | `contacts` | Yes — contacts master |
 | `addresses` | Yes — destinations (0..1 per task) |
-| `task_types` | Optional — enums on `tasks` are source of truth |
-| `task_statuses` | Optional — enums on `tasks` are source of truth |
-| `task_status_transitions` | Optional — can hardcode in app for MVP |
 | `tasks` | Yes |
 | `task_crew_members` | Yes — multi-assign (`crewMemberIds`) |
 | `task_contacts` | Yes — multi-assign contacts (`contactIds`) |
@@ -574,7 +508,6 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | `task_documents` | Yes — PDF label, docket, POD |
 | `email_deliveries` | Yes — automatic email log |
 | `task_crew_events` | Yes — per-crew start/end logs; derives In Progress / Completed |
-| `task_status_events` | Recommended — status-change audit trail |
 
 ---
 
