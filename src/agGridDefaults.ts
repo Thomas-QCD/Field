@@ -4,6 +4,7 @@ import type { Address } from './api/addresses';
 import type { Contact } from './api/contacts';
 import { TaskStatusBadge } from './components/TaskStatusBadge';
 import type { Task, TaskStatus } from './types/task';
+import { formatShortName } from './formatName';
 import { formatTimeAgo } from './formatTime';
 
 /**
@@ -207,7 +208,11 @@ const taskColumnDefsBase: ColDef<Task>[] = [
 	{
 		field: 'createdByName',
 		headerName: 'Created by',
-		valueFormatter: emptyDash,
+		valueFormatter: (p: ValueFormatterParams<Task, string>) => {
+			const name = p.value?.trim();
+			if (!name) return '—';
+			return formatShortName(name);
+		},
 		minWidth: 100,
 		flex: 1,
 	},

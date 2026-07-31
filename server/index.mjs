@@ -723,7 +723,9 @@ async function listTasks(opts = {}) {
   let crewClause = "";
   if (crewMemberId) {
     params.push(crewMemberId);
-    crewClause = `AND EXISTS (
+    // Cancelled tasks stay on All Tasks / Delivery Cancelled only — not member lists.
+    crewClause = `AND t.status <> 'Cancelled'::task_status
+       AND EXISTS (
          SELECT 1
          FROM task_crew_members tcm_filter
          WHERE tcm_filter.task_id = t.id

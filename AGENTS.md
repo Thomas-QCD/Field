@@ -132,7 +132,7 @@ App, API, and most services run on the developer machine. **RDS PostgreSQL `fiel
 | Email        | **Amazon SES** via SDK (`EMAIL_PROVIDER=ses`); `console` fallback | Amazon SES — From `noreply@qcdlv.net` |
 | PDF output   | Local `./storage/documents`                              | S3 (later)                                      |
 
-**RDS `field-dev` (dev):** `db.t4g.micro`, Single-AZ, 20 GB gp3, publicly accessible, security group locked to the developer public IP. Master password in Secrets Manager. Connection placeholders in [`.env.example`](.env.example).
+**RDS `field-dev` (dev):** `db.t4g.micro`, Single-AZ, 20 GB gp3, publicly accessible, security group locked to the developer public IP. Master password in Secrets Manager (automatic rotation **off** — rotate manually with `npm run db:rotate-secret`, which also redeploys staging ECS and recycles Wodely Lambdas). Connection placeholders in [`.env.example`](.env.example).
 
 **S3 `field-dev-attachments` (dev):** private bucket in us-west-1 for task attachments (presigned PUT/GET). CORS allows browser Vite, Android emulator (`10.0.2.2`), Capacitor WebView origins, and the current LAN IP for `cap:live -- device`. When the LAN IP changes: `npm run s3:cors`. Env: `AWS_REGION`, `S3_BUCKET` in [`.env.example`](.env.example).
 

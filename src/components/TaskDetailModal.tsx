@@ -52,6 +52,26 @@ const STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
 	Cancelled: [],
 };
 
+/** Delivery: Loaded plays the same role as In Progress for other task types. */
+const DELIVERY_STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+	Unassigned: ['Assigned'],
+	Assigned: ['Loaded', 'Failed'],
+	Loaded: ['Completed', 'Failed', 'Undetermined'],
+	'In Progress': ['Completed', 'Failed', 'Undetermined'],
+	Completed: ['Loaded'],
+	Failed: [],
+	Undetermined: [],
+	Cancelled: [],
+};
+
+function statusTransitionsFor(
+	taskType: string | undefined,
+): Record<TaskStatus, TaskStatus[]> {
+	return taskType === 'Delivery'
+		? DELIVERY_STATUS_TRANSITIONS
+		: STATUS_TRANSITIONS;
+}
+
 function formatDateTime(value: string | null): string {
 	if (!value) return '—';
 	const d = new Date(value);
@@ -327,7 +347,9 @@ export function TaskDetailModal({
 		}
 	};
 
-	const statusOptions = task ? (STATUS_TRANSITIONS[task.status] ?? []) : [];
+	const statusOptions = task
+		? (statusTransitionsFor(task.taskType)[task.status] ?? [])
+		: [];
 
 	const title =
 		task?.externalKey != null && task.externalKey !== ''
@@ -542,7 +564,11 @@ export function TaskDetailModal({
 										<DetailFields>
 											<DetailField
 												label='Created by'
-												value={task.createdByName}
+												value={
+													task.createdByName
+														? formatShortName(task.createdByName)
+														: ''
+												}
 											/>
 											{task.description ? (
 												<DetailField

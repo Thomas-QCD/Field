@@ -14,7 +14,8 @@ interface MultiShotCameraProps {
 
 type CapturedShot = {
 	id: string;
-	file: File;
+	/** Null while JPEG encode is still running in the background. */
+	file: File | null;
 	previewUrl: string;
 };
 
@@ -36,6 +37,8 @@ const ASPECT_LABELS: Record<AspectRatio, string> = {
 const MAX_SHOTS = 30;
 const JPEG_QUALITY = 0.85;
 const NATIVE_CAPTURE_QUALITY = 85;
+/** Cap long edge so canvas → JPEG stays snappy on phones. */
+const MAX_OUTPUT_EDGE = 1920;
 const ACTIVE_CLASS = 'multi-shot-camera-active';
 /** CameraPreview.start can hang on some Android devices (esp. TextureView). */
 const NATIVE_START_TIMEOUT_MS = 10_000;
@@ -190,10 +193,29 @@ function canvasToJpegFile(canvas: HTMLCanvasElement): Promise<File> {
 	});
 }
 
-function base64ToImage(base64: string): Promise<HTMLImageElement> {
-	const raw = base64.includes(',')
+function revokePreviewUrl(url: string) {
+	if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+function base64DataUrl(base64: string): string {
+	return base64.includes(',')
 		? base64
 		: `data:image/jpeg;base64,${base64}`;
+}
+
+/** Sync File from native capture JPEG — skip canvas re-encode when aspect is full. */
+function base64ToJpegFile(base64: string): File {
+	const raw = base64.includes(',') ? base64.slice(base64.indexOf(',') + 1) : base64;
+	const binary = atob(raw);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i += 1) {
+		bytes[i] = binary.charCodeAt(i);
+	}
+	return new File([bytes], stampName(), { type: 'image/jpeg' });
+}
+
+function base64ToImage(base64: string): Promise<HTMLImageElement> {
+	const raw = base64DataUrl(base64);
 	return new Promise((resolve, reject) => {
 		const img = new Image();
 		img.onload = () => resolve(img);
@@ -202,30 +224,51 @@ function base64ToImage(base64: string): Promise<HTMLImageElement> {
 	});
 }
 
-async function cropImageSource(
+function sourceSize(
+	source: HTMLImageElement | HTMLVideoElement,
+): { w: number; h: number } {
+	if (source instanceof HTMLVideoElement) {
+		return { w: source.videoWidth, h: source.videoHeight };
+	}
+	return { w: source.naturalWidth, h: source.naturalHeight };
+}
+
+/** Crop source onto a canvas (drawImage is sync; JPEG encode stays async). */
+function drawSourceToCanvas(
 	source: HTMLImageElement | HTMLVideoElement,
 	aspect: AspectRatio,
-): Promise<File> {
-	const sourceW =
-		source instanceof HTMLVideoElement
-			? source.videoWidth
-			: source.naturalWidth;
-	const sourceH =
-		source instanceof HTMLVideoElement
-			? source.videoHeight
-			: source.naturalHeight;
+): HTMLCanvasElement {
+	const { w: sourceW, h: sourceH } = sourceSize(source);
 	if (!sourceW || !sourceH) {
 		throw new Error('Camera is not ready yet');
 	}
 
 	const { x, y, w, h } = cropRect(sourceW, sourceH, aspect);
+	const scale = Math.min(1, MAX_OUTPUT_EDGE / Math.max(w, h));
+	const outW = Math.max(1, Math.round(w * scale));
+	const outH = Math.max(1, Math.round(h * scale));
 	const canvas = document.createElement('canvas');
-	canvas.width = w;
-	canvas.height = h;
+	canvas.width = outW;
+	canvas.height = outH;
 	const ctx = canvas.getContext('2d');
 	if (!ctx) throw new Error('Could not capture photo');
-	ctx.drawImage(source, x, y, w, h, 0, 0, w, h);
-	return canvasToJpegFile(canvas);
+	ctx.drawImage(source, x, y, w, h, 0, 0, outW, outH);
+	return canvas;
+}
+
+/** Small sync data-URL for the strip thumb so UI updates before toBlob finishes. */
+function canvasThumbPreviewUrl(canvas: HTMLCanvasElement): string {
+	const maxEdge = 140;
+	const scale = Math.min(1, maxEdge / Math.max(canvas.width, canvas.height));
+	const tw = Math.max(1, Math.round(canvas.width * scale));
+	const th = Math.max(1, Math.round(canvas.height * scale));
+	const thumb = document.createElement('canvas');
+	thumb.width = tw;
+	thumb.height = th;
+	const ctx = thumb.getContext('2d');
+	if (!ctx) return canvas.toDataURL('image/jpeg', 0.6);
+	ctx.drawImage(canvas, 0, 0, tw, th);
+	return thumb.toDataURL('image/jpeg', 0.7);
 }
 
 function setNativeOverlayActive(active: boolean) {
@@ -446,7 +489,7 @@ export function MultiShotCamera({
 			}
 
 			for (const shot of shotsRef.current) {
-				URL.revokeObjectURL(shot.previewUrl);
+				revokePreviewUrl(shot.previewUrl);
 			}
 		};
 	}, []);
@@ -486,27 +529,101 @@ export function MultiShotCamera({
 		setFlash(true);
 		window.setTimeout(() => setFlash(false), 120);
 
+		const shotId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 		try {
 			const currentAspect = aspectRef.current;
-			let file: File;
+
 			if (mode === 'native') {
 				const result = await CameraPreview.capture({
 					quality: NATIVE_CAPTURE_QUALITY,
 				});
-				const img = await base64ToImage(result.value);
-				file = await cropImageSource(img, currentAspect);
-			} else {
-				const video = videoRef.current;
-				if (!video) throw new Error('Camera is not ready yet');
-				file = await cropImageSource(video, currentAspect);
+				const dataUrl = base64DataUrl(result.value);
+
+				if (currentAspect === 'full') {
+					const file = base64ToJpegFile(result.value);
+					setShots((prev) => [
+						...prev,
+						{ id: shotId, file, previewUrl: dataUrl },
+					]);
+					return;
+				}
+
+				// Show uncropped capture immediately; crop + re-encode in background.
+				setShots((prev) => [
+					...prev,
+					{ id: shotId, file: null, previewUrl: dataUrl },
+				]);
+
+				void (async () => {
+					try {
+						const img = await base64ToImage(result.value);
+						const canvas = drawSourceToCanvas(img, currentAspect);
+						const file = await canvasToJpegFile(canvas);
+						const croppedPreview = URL.createObjectURL(file);
+						setShots((prev) => {
+							const existing = prev.find((s) => s.id === shotId);
+							if (!existing) {
+								URL.revokeObjectURL(croppedPreview);
+								return prev;
+							}
+							return prev.map((s) =>
+								s.id === shotId
+									? { id: shotId, file, previewUrl: croppedPreview }
+									: s,
+							);
+						});
+					} catch (err: unknown) {
+						setShots((prev) => {
+							const existing = prev.find((s) => s.id === shotId);
+							if (existing) revokePreviewUrl(existing.previewUrl);
+							return prev.filter((s) => s.id !== shotId);
+						});
+						setError(
+							err instanceof Error ? err.message : 'Capture failed',
+						);
+					}
+				})();
+				return;
 			}
 
-			const shot: CapturedShot = {
-				id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-				file,
-				previewUrl: URL.createObjectURL(file),
-			};
-			setShots((prev) => [...prev, shot]);
+			const video = videoRef.current;
+			if (!video) throw new Error('Camera is not ready yet');
+
+			const canvas = drawSourceToCanvas(video, currentAspect);
+			const previewUrl = canvasThumbPreviewUrl(canvas);
+			setShots((prev) => [
+				...prev,
+				{ id: shotId, file: null, previewUrl },
+			]);
+
+			void (async () => {
+				try {
+					const file = await canvasToJpegFile(canvas);
+					const blobPreview = URL.createObjectURL(file);
+					setShots((prev) => {
+						const existing = prev.find((s) => s.id === shotId);
+						if (!existing) {
+							URL.revokeObjectURL(blobPreview);
+							return prev;
+						}
+						return prev.map((s) => {
+							if (s.id !== shotId) return s;
+							revokePreviewUrl(s.previewUrl);
+							return { id: shotId, file, previewUrl: blobPreview };
+						});
+					});
+				} catch (err: unknown) {
+					setShots((prev) => {
+						const existing = prev.find((s) => s.id === shotId);
+						if (existing) revokePreviewUrl(existing.previewUrl);
+						return prev.filter((s) => s.id !== shotId);
+					});
+					setError(
+						err instanceof Error ? err.message : 'Capture failed',
+					);
+				}
+			})();
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : 'Capture failed');
 		} finally {
@@ -518,15 +635,20 @@ export function MultiShotCamera({
 		setShots((prev) => {
 			const next = prev.filter((s) => s.id !== id);
 			const removed = prev.find((s) => s.id === id);
-			if (removed) URL.revokeObjectURL(removed.previewUrl);
+			if (removed) revokePreviewUrl(removed.previewUrl);
 			return next;
 		});
 	};
 
+	const encoding = shots.some((s) => s.file == null);
+
 	const handleDone = () => {
-		const files = shots.map((s) => s.file);
+		if (encoding) return;
+		const files = shots
+			.map((s) => s.file)
+			.filter((f): f is File => f != null);
 		for (const shot of shots) {
-			URL.revokeObjectURL(shot.previewUrl);
+			revokePreviewUrl(shot.previewUrl);
 		}
 		setShots([]);
 		onComplete(files);
@@ -589,7 +711,7 @@ export function MultiShotCamera({
 				<button
 					type='button'
 					className='multi-shot-camera-text-btn multi-shot-camera-text-btn--done'
-					disabled={shots.length === 0}
+					disabled={shots.length === 0 || encoding}
 					onClick={handleDone}
 				>
 					<Check size={18} strokeWidth={2.5} aria-hidden />
@@ -610,7 +732,14 @@ export function MultiShotCamera({
 			{shots.length > 0 ? (
 				<ul className='multi-shot-camera-thumbs' aria-label='Captured photos'>
 					{shots.map((shot) => (
-						<li key={shot.id} className='multi-shot-camera-thumb'>
+						<li
+							key={shot.id}
+							className={
+								shot.file == null
+									? 'multi-shot-camera-thumb multi-shot-camera-thumb--encoding'
+									: 'multi-shot-camera-thumb'
+							}
+						>
 							<img src={shot.previewUrl} alt='' />
 							<button
 								type='button'

@@ -8,6 +8,7 @@ import {
 	Image,
 	MessageSquare,
 	Navigation,
+	Package,
 	Phone,
 	Play,
 } from 'lucide-react';
@@ -274,6 +275,7 @@ function TaskViewBody({
 	const address = task.destinationAddress.trim();
 	const destinationName = task.destinationAddressName.trim();
 	const canNavigate = Boolean(address);
+	const isDelivery = task.taskType === 'Delivery';
 
 	const me = userId ? task.crewMembers.find((m) => m.id === userId) : undefined;
 	const canReopenCompleted = task.status === 'Completed';
@@ -327,7 +329,9 @@ function TaskViewBody({
 			eventType === 'started' &&
 			task.status === 'Completed' &&
 			!window.confirm(
-				'This task is completed. Starting it will remove the completed status and change the task to In Progress. Continue?',
+				isDelivery
+					? 'This task is completed. Loading items will remove the completed status and change the task to Loaded. Continue?'
+					: 'This task is completed. Starting it will remove the completed status and change the task to In Progress. Continue?',
 			)
 		) {
 			return;
@@ -396,13 +400,13 @@ function TaskViewBody({
 					onClick={() => openMapsNavigation(address)}
 				/>
 				<ActionButton
-					label='Start task'
-					icon={Play}
+					label={isDelivery ? 'Load items' : 'Start task'}
+					icon={isDelivery ? Package : Play}
 					disabled={!canStart || eventBusy || mediaBusy}
 					onClick={() => void logCrewEvent('started')}
 				/>
 				<ActionButton
-					label='End task'
+					label={isDelivery ? 'Deliver items' : 'End task'}
 					icon={CheckCircle}
 					disabled={!canEnd || eventBusy || mediaBusy}
 					onClick={onEndTask}
@@ -676,7 +680,13 @@ export function TaskViewPage() {
 					task={task}
 					userId={user?.id ?? null}
 					onCrewEvent={handleCrewEvent}
-					onEndTask={() => navigate(`/task/${task.id}/complete`)}
+					onEndTask={() =>
+						navigate(
+							task.taskType === 'Delivery'
+								? `/task/${task.id}/deliver`
+								: `/task/${task.id}/complete`,
+						)
+					}
 					onAttachmentsChange={(attachments) =>
 						setTask((prev) => (prev ? { ...prev, attachments } : prev))
 					}

@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Box, Button, Group, Loader, TextInput } from '@mantine/core';
-import { Filter, Search } from 'lucide-react';
+import {
+	Alert,
+	Box,
+	Button,
+	Group,
+	Loader,
+	Text,
+	TextInput,
+	UnstyledButton,
+} from '@mantine/core';
+import { ChevronLeft, Filter, Search } from 'lucide-react';
 import { listTasks } from '../api/tasks';
 import { DeliveryTaskCards } from '../components/DeliveryTaskCards';
+import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
 import type { Task, TaskStatus } from '../types/task';
 
 const STATUS_FILTERS = [
@@ -14,6 +24,15 @@ const STATUS_FILTERS = [
 
 type StatusFilterValue = (typeof STATUS_FILTERS)[number]['value'];
 
+const DUE_DATE_FILTERS = [
+	{ value: 'all', label: 'All' },
+	{ value: 'overdue', label: 'Overdue' },
+	{ value: 'today', label: 'Due today' },
+	{ value: 'tomorrow', label: 'Tomorrow' },
+] as const;
+
+type DueDateFilterValue = (typeof DUE_DATE_FILTERS)[number]['value'];
+
 function matchesStatusFilter(
 	status: TaskStatus,
 	filter: StatusFilterValue,
@@ -23,13 +42,57 @@ function matchesStatusFilter(
 	return (entry.statuses as readonly TaskStatus[]).includes(status);
 }
 
+function startOfLocalDay(day = new Date()): Date {
+	return new Date(day.getFullYear(), day.getMonth(), day.getDate());
+}
+
+/** Prefer window end as the due date; fall back to start. */
+function taskDueDate(task: Task): Date | null {
+	const iso = task.windowEndAt ?? task.windowStartAt;
+	if (!iso) return null;
+	const d = new Date(iso);
+	return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+	return (
+		a.getFullYear() === b.getFullYear() &&
+		a.getMonth() === b.getMonth() &&
+		a.getDate() === b.getDate()
+	);
+}
+
+function matchesDueDateFilter(
+	task: Task,
+	filter: DueDateFilterValue,
+): boolean {
+	if (filter === 'all') return true;
+	const due = taskDueDate(task);
+	if (!due) return false;
+
+	const today = startOfLocalDay();
+	if (filter === 'overdue') return due < today;
+	if (filter === 'today') return isSameLocalDay(due, today);
+
+	const tomorrow = startOfLocalDay();
+	tomorrow.setDate(tomorrow.getDate() + 1);
+	if (filter === 'tomorrow') return isSameLocalDay(due, tomorrow);
+
+	return true;
+}
+
 export function DeliveryPage() {
 	const navigate = useNavigate();
 	const [tasks, setTasks] = useState<Task[]>([]);
 	const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
+	const [dueDateFilter, setDueDateFilter] =
+		useState<DueDateFilterValue>('all');
+	const [filterViewOpen, setFilterViewOpen] = useState(false);
 	const [jobNumber, setJobNumber] = useState('');
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+
+	useAndroidBackHandler(() => setFilterViewOpen(false), filterViewOpen);
 
 	const refreshTasks = useCallback(async (signal?: AbortSignal) => {
 		setLoading(true);
@@ -37,7 +100,13 @@ export function DeliveryPage() {
 		try {
 			const next = await listTasks(signal);
 			if (!signal?.aborted) {
-				setTasks(next.filter((task) => task.taskType === 'Delivery'));
+				// Cancelled deliveries only on desktop Delivery Cancelled tab.
+				setTasks(
+					next.filter(
+						(task) =>
+							task.taskType === 'Delivery' && task.status !== 'Cancelled',
+					),
+				);
 			}
 		} catch (err: unknown) {
 			if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -59,21 +128,75 @@ export function DeliveryPage() {
 			number
 		>;
 		for (const task of tasks) {
+			if (!matchesDueDateFilter(task, dueDateFilter)) continue;
 			counts.all += 1;
 			if (task.status === 'Assigned') counts.assigned += 1;
 			if (task.status === 'Loaded') counts.loaded += 1;
 		}
 		return counts;
-	}, [tasks]);
+	}, [tasks, dueDateFilter]);
 
 	const visibleTasks = useMemo(() => {
 		const jobQuery = jobNumber.trim();
 		return tasks.filter((task) => {
 			if (!matchesStatusFilter(task.status, statusFilter)) return false;
+			if (!matchesDueDateFilter(task, dueDateFilter)) return false;
 			if (jobQuery && !task.externalKey.includes(jobQuery)) return false;
 			return true;
 		});
-	}, [tasks, statusFilter, jobNumber]);
+	}, [tasks, statusFilter, dueDateFilter, jobNumber]);
+
+	if (filterViewOpen) {
+		return (
+			<Box className='tasks-page delivery-page delivery-filter-view'>
+				<header className='delivery-filter-header'>
+					<UnstyledButton
+						onClick={() => setFilterViewOpen(false)}
+						aria-label='Back'
+						className='delivery-filter-back'
+					>
+						<ChevronLeft size={28} strokeWidth={2} aria-hidden />
+					</UnstyledButton>
+					<Text fw={700} fz='lg' className='delivery-filter-title'>
+						Task filters
+					</Text>
+				</header>
+
+				<section
+					className='delivery-filter-section'
+					aria-labelledby='delivery-filter-due-date-label'
+				>
+					<h2
+						id='delivery-filter-due-date-label'
+						className='delivery-filter-section-label'
+					>
+						Due date
+					</h2>
+					<div
+						className='delivery-filter-options'
+						role='group'
+						aria-label='Filter tasks by due date'
+					>
+						{DUE_DATE_FILTERS.map((option) => {
+							const selected = option.value === dueDateFilter;
+							return (
+								<button
+									key={option.value}
+									type='button'
+									className='delivery-filter-option'
+									data-selected={selected || undefined}
+									aria-pressed={selected}
+									onClick={() => setDueDateFilter(option.value)}
+								>
+									{option.label}
+								</button>
+							);
+						})}
+					</div>
+				</section>
+			</Box>
+		);
+	}
 
 	return (
 		<Box className='tasks-page delivery-page'>
@@ -83,7 +206,8 @@ export function DeliveryPage() {
 					radius='xl'
 					leftSection={<Filter size={16} />}
 					className='delivery-count-btn'
-					aria-label={`${visibleTasks.length} tasks`}
+					aria-label={`${visibleTasks.length} tasks, open filters`}
+					onClick={() => setFilterViewOpen(true)}
 				>
 					{visibleTasks.length} Tasks
 				</Button>

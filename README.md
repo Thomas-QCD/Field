@@ -40,6 +40,12 @@ npm run db:schema
 
 Applies [`db/migrations/001_initial_schema.sql`](db/migrations/001_initial_schema.sql) to `field-dev` (empty tables, no seed data). Connection details in [`.env.example`](.env.example).
 
+Manual RDS master-password rotate (also redeploys staging ECS + recycles Wodely Lambdas):
+
+```bash
+npm run db:rotate-secret
+```
+
 ### Delivery docket PDF
 
 From a task in the UI: **More actions → Print delivery docket** (`GET /api/tasks/:id/delivery-docket`).

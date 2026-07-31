@@ -708,6 +708,29 @@ const STATUS_TRANSITIONS = {
   Cancelled: [],
 };
 
+/** Delivery: Loaded is the active-work status (same role as In Progress). */
+/** @type {Record<string, string[]>} */
+const DELIVERY_STATUS_TRANSITIONS = {
+  Unassigned: ["Assigned"],
+  Assigned: ["Loaded", "Failed"],
+  Loaded: ["Completed", "Failed", "Undetermined"],
+  "In Progress": ["Completed", "Failed", "Undetermined"],
+  Completed: ["Loaded"],
+  Failed: [],
+  Undetermined: [],
+  Cancelled: [],
+};
+
+/**
+ * @param {string | undefined} taskType
+ * @returns {Record<string, string[]>}
+ */
+function statusTransitionsFor(taskType) {
+  return taskType === "Delivery"
+    ? DELIVERY_STATUS_TRANSITIONS
+    : STATUS_TRANSITIONS;
+}
+
 const TERMINAL_STATUSES = new Set([
   "Completed",
   "Failed",
@@ -745,8 +768,8 @@ export async function endOpenCrewStarts(client, taskId) {
 
 /**
  * Log a per-crew start/end event and derive task status:
- * - First Start → In Progress (unless already In Progress / terminal)
- * - Start on Completed → reopen to In Progress (clears that user's end + note)
+ * - First Start → In Progress (Delivery → Loaded) unless already at that status / terminal
+ * - Start on Completed → reopen to In Progress (Delivery → Loaded); clears that user's end + note
  * - All starters have Ended → Completed | Failed | Undetermined from per-user outcomes
  *
  * @param {number} taskId
@@ -814,7 +837,7 @@ export async function createCrewEvent(taskId, body) {
     await client.query("BEGIN");
 
     const existing = await client.query(
-      `SELECT id, status, completed_at, completed_notes, failed_reason
+      `SELECT id, status, task_type, completed_at, completed_notes, failed_reason
        FROM tasks
        WHERE id = $1 AND deleted_at IS NULL
        FOR UPDATE`,
@@ -825,6 +848,9 @@ export async function createCrewEvent(taskId, body) {
     }
 
     const fromStatus = existing.rows[0].status;
+    const taskType = String(existing.rows[0].task_type);
+    /** Delivery Load Items → Loaded; other types Start → In Progress. */
+    const startStatus = taskType === "Delivery" ? "Loaded" : "In Progress";
     const reopeningCompleted =
       fromStatus === "Completed" && eventType === "started";
 
@@ -957,27 +983,27 @@ export async function createCrewEvent(taskId, body) {
 
     if (eventType === "started") {
       if (reopeningCompleted) {
-        nextStatus = "In Progress";
+        nextStatus = startStatus;
         completedAt = null;
         await client.query(
           `UPDATE tasks
-           SET status = 'In Progress'::task_status,
+           SET status = $2::task_status,
                completed_at = NULL,
                updated_at = NOW()
            WHERE id = $1`,
-          [taskId],
+          [taskId, startStatus],
         );
       } else if (
-        fromStatus !== "In Progress" &&
+        fromStatus !== startStatus &&
         !TERMINAL_STATUSES.has(fromStatus)
       ) {
-        nextStatus = "In Progress";
+        nextStatus = startStatus;
         await client.query(
           `UPDATE tasks
-           SET status = 'In Progress'::task_status,
+           SET status = $2::task_status,
                updated_at = NOW()
            WHERE id = $1`,
-          [taskId],
+          [taskId, startStatus],
         );
       }
     } else {
@@ -1092,7 +1118,11 @@ export async function updateTaskStatus(taskId, body) {
   }
 
   const status = asString(body.status);
-  if (!status || !(status in STATUS_TRANSITIONS)) {
+  if (
+    !status ||
+    (!(status in STATUS_TRANSITIONS) &&
+      !(status in DELIVERY_STATUS_TRANSITIONS))
+  ) {
     throw Object.assign(new Error(`Invalid status: ${status || "(empty)"}`), {
       status: 400,
     });
@@ -1110,7 +1140,7 @@ export async function updateTaskStatus(taskId, body) {
     await client.query("BEGIN");
 
     const existing = await client.query(
-      `SELECT id, status, completed_at, completed_notes, failed_reason
+      `SELECT id, status, task_type, completed_at, completed_notes, failed_reason
        FROM tasks
        WHERE id = $1 AND deleted_at IS NULL
        FOR UPDATE`,
@@ -1121,6 +1151,7 @@ export async function updateTaskStatus(taskId, body) {
     }
 
     const fromStatus = existing.rows[0].status;
+    const taskType = String(existing.rows[0].task_type);
     let completedNotes = existing.rows[0].completed_notes ?? null;
     let failedReason = existing.rows[0].failed_reason ?? null;
     let completedAt = existing.rows[0].completed_at
@@ -1160,7 +1191,7 @@ export async function updateTaskStatus(taskId, body) {
       };
     }
 
-    const allowed = STATUS_TRANSITIONS[fromStatus] ?? [];
+    const allowed = statusTransitionsFor(taskType)[fromStatus] ?? [];
     if (!allowed.includes(status)) {
       throw Object.assign(
         new Error(`Cannot change status from ${fromStatus} to ${status}`),
@@ -1223,15 +1254,15 @@ export async function updateTaskStatus(taskId, body) {
          RETURNING id, status, completed_at, completed_notes, failed_reason`,
         [taskId],
       ));
-    } else if (status === "In Progress") {
+    } else if (status === "In Progress" || status === "Loaded") {
       ({ rows } = await client.query(
         `UPDATE tasks
-         SET status = 'In Progress'::task_status,
+         SET status = $2::task_status,
              completed_at = NULL,
              updated_at = NOW()
          WHERE id = $1
          RETURNING id, status, completed_at, completed_notes, failed_reason`,
-        [taskId],
+        [taskId, status],
       ));
     } else {
       ({ rows } = await client.query(

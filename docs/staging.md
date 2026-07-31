@@ -129,6 +129,7 @@ Add an alternate domain + ACM certificate on the **same** CloudFront distributio
 | `npm run infra:diff` | Diff vs deployed stack |
 | `npm run infra:deploy` | Deploy/update stack (**creates AWS resources**) |
 | `npm run api:staging` | Docker build/push + ECS desiredCount=1 |
+| `npm run db:rotate-secret` | Rotate field-dev RDS master password + refresh ECS/Lambdas |
 | `npm run web:staging` | `vite build` → S3 sync → CF invalidation |
 | `npm run cap:staging` | Build Cap web bundle with staging `VITE_API_BASE` + `cap sync` |
 | `npm run android:keystore` | One-time release keystore + `keystore.properties` |

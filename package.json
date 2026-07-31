@@ -27,6 +27,7 @@
     "db:import-wodely-tasks": "node scripts/import-wodely-tasks.mjs",
     "db:seed-dev-tasks": "node scripts/seed-dev-tasks.mjs",
     "db:wipe-tasks": "node scripts/wipe-tasks.mjs",
+    "db:rotate-secret": "node scripts/rotate-db-secret.mjs",
     "pdf:docket": "node scripts/generate-delivery-docket.mjs",
     "email:test": "node scripts/send-test-email.mjs",
     "s3:cors": "node scripts/s3-cors.mjs",

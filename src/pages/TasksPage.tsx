@@ -66,9 +66,59 @@ const STATUS_TABS = [
 	statuses: readonly TaskStatus[];
 }>;
 
-type StatusTabValue = (typeof STATUS_TABS)[number]['value'];
+/** Delivery: Loaded is the active-work bucket (same role as In Progress). */
+const DELIVERY_STATUS_TABS = [
+	{
+		value: 'loaded',
+		label: 'Loaded',
+		// Include legacy In Progress so older delivery rows still appear here.
+		statuses: ['Loaded', 'In Progress'],
+	},
+	{ value: 'completed', label: 'Completed', statuses: ['Completed'] },
+	{ value: 'failed', label: 'Failed', statuses: ['Failed'] },
+	{
+		value: 'undetermined',
+		label: 'Undetermined',
+		statuses: ['Undetermined'],
+	},
+	{
+		value: 'upcoming',
+		label: 'Upcoming',
+		statuses: ['Unassigned', 'Assigned'],
+	},
+	{ value: 'cancelled', label: 'Cancelled', statuses: ['Cancelled'] },
+] as const satisfies ReadonlyArray<{
+	value: string;
+	label: string;
+	statuses: readonly TaskStatus[];
+}>;
 
-const DEFAULT_STATUS_TAB: StatusTabValue = 'in_progress';
+type StatusTabValue =
+	| (typeof STATUS_TABS)[number]['value']
+	| (typeof DELIVERY_STATUS_TABS)[number]['value'];
+
+type StatusTabDef = {
+	value: StatusTabValue;
+	label: string;
+	statuses: readonly TaskStatus[];
+};
+
+function statusTabsForMode(mode: 'all' | 'mine' | 'delivery'): StatusTabDef[] {
+	return mode === 'delivery'
+		? [...DELIVERY_STATUS_TABS]
+		: [...STATUS_TABS];
+}
+
+function defaultStatusTab(mode: 'all' | 'mine' | 'delivery'): StatusTabValue {
+	return mode === 'delivery' ? 'loaded' : 'in_progress';
+}
+
+function matchesStatusTab(
+	status: TaskStatus,
+	tab: StatusTabDef,
+): boolean {
+	return tab.statuses.includes(status);
+}
 
 const DAY_FILTER_OPTIONS = [
 	{ label: 'All', value: 'all' },
@@ -77,13 +127,6 @@ const DAY_FILTER_OPTIONS = [
 ] as const;
 
 type DayFilterValue = (typeof DAY_FILTER_OPTIONS)[number]['value'];
-
-function matchesStatusTab(status: TaskStatus, tab: StatusTabValue): boolean {
-	const entry = STATUS_TABS.find((t) => t.value === tab);
-	return entry
-		? (entry.statuses as readonly TaskStatus[]).includes(status)
-		: false;
-}
 
 function toDateTimeLocal(iso: string | null): string {
 	if (!iso) {
@@ -177,7 +220,7 @@ function parseDayKey(key: string): Date {
 export function TasksPage({
 	mode = 'all',
 }: {
-	mode?: 'all' | 'mine';
+	mode?: 'all' | 'mine' | 'delivery';
 }) {
 	const { user } = useCurrentUser();
 	const navigate = useNavigate();
@@ -189,8 +232,9 @@ export function TasksPage({
 	const [tasks, setTasks] = useState<Task[]>([]);
 	const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
 	const [dayFilter, setDayFilter] = useState<DayFilterValue>('all');
-	const [statusTab, setStatusTab] =
-		useState<StatusTabValue>(DEFAULT_STATUS_TAB);
+	const [statusTab, setStatusTab] = useState<StatusTabValue>(() =>
+		defaultStatusTab(mode),
+	);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [visibleColumns, setVisibleColumns] = useState<TaskColumnField[]>(
@@ -264,11 +308,42 @@ export function TasksPage({
 	/** Mobile My Tasks uses day chips instead of All / Today / Tomorrow. */
 	const showDayFilter = !useCardView;
 
+	/** Cancelled tab only on desktop All Tasks / Delivery — not member lists. */
+	const visibleStatusTabs = useMemo(() => {
+		const tabs = statusTabsForMode(mode);
+		return mode === 'mine'
+			? tabs.filter((tab) => tab.value !== 'cancelled')
+			: tabs;
+	}, [mode]);
+
+	useEffect(() => {
+		if (
+			mode === 'mine' &&
+			statusTab === 'cancelled' &&
+			visibleStatusTabs.length > 0
+		) {
+			setStatusTab(defaultStatusTab(mode));
+		}
+	}, [mode, statusTab, visibleStatusTabs]);
+
+	useEffect(() => {
+		const allowed = new Set(visibleStatusTabs.map((tab) => tab.value));
+		if (!allowed.has(statusTab)) {
+			setStatusTab(defaultStatusTab(mode));
+		}
+	}, [mode, statusTab, visibleStatusTabs]);
+
 	/** Tasks in the current page scope (mode + day), before status-tab filter. */
 	const scopedTasks = useMemo(() => {
 		let next = tasks;
 		if (mode === 'all') {
 			next = next.filter((task) => task.taskType !== 'Delivery');
+		} else if (mode === 'delivery') {
+			next = next.filter((task) => task.taskType === 'Delivery');
+		}
+		// Member lists never include cancelled tasks.
+		if (mode === 'mine') {
+			next = next.filter((task) => task.status !== 'Cancelled');
 		}
 		if (useCardView && selectedDayKey) {
 			const day = parseDayKey(selectedDayKey);
@@ -283,24 +358,27 @@ export function TasksPage({
 
 	const statusTabCounts = useMemo(() => {
 		const counts = {} as Record<StatusTabValue, number>;
-		for (const tab of STATUS_TABS) {
+		for (const tab of visibleStatusTabs) {
 			counts[tab.value] = 0;
 		}
 		for (const task of scopedTasks) {
-			for (const tab of STATUS_TABS) {
-				if (matchesStatusTab(task.status, tab.value)) {
+			for (const tab of visibleStatusTabs) {
+				if (matchesStatusTab(task.status, tab)) {
 					counts[tab.value] += 1;
 					break;
 				}
 			}
 		}
 		return counts;
-	}, [scopedTasks]);
+	}, [scopedTasks, visibleStatusTabs]);
 
 	const visibleTasks = useMemo(() => {
 		let next = scopedTasks;
 		if (showStatusTabs) {
-			next = next.filter((task) => matchesStatusTab(task.status, statusTab));
+			const tab = visibleStatusTabs.find((t) => t.value === statusTab);
+			if (tab) {
+				next = next.filter((task) => matchesStatusTab(task.status, tab));
+			}
 		}
 		if (mode === 'mine') {
 			next = [...next].sort(
@@ -308,7 +386,7 @@ export function TasksPage({
 			);
 		}
 		return next;
-	}, [scopedTasks, showStatusTabs, statusTab, mode]);
+	}, [scopedTasks, showStatusTabs, statusTab, visibleStatusTabs, mode]);
 
 	const crewMemberId = mode === 'mine' ? (user?.id ?? null) : null;
 
@@ -429,8 +507,9 @@ export function TasksPage({
 		});
 	}, [editingTask]);
 
-	const pageTitle = mode === 'mine' ? 'My Tasks' : 'Tasks';
-	const canCreateTask = mode === 'all';
+	const pageTitle =
+		mode === 'mine' ? 'My Tasks' : mode === 'delivery' ? 'Delivery' : 'Tasks';
+	const canCreateTask = mode === 'all' || mode === 'delivery';
 
 	return (
 		<Box className='tasks-page'>
@@ -497,7 +576,7 @@ export function TasksPage({
 					role='tablist'
 					aria-label='Filter tasks by status'
 				>
-					{STATUS_TABS.map((tab) => {
+					{visibleStatusTabs.map((tab) => {
 						const selected = tab.value === statusTab;
 						const count = statusTabCounts[tab.value];
 						return (
