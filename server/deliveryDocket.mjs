@@ -18,7 +18,7 @@ const PAGE_WIDTH = 612; // US Letter
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const LOGO_PATH = path.join(root, "public", "logoColor.png");
 const LOGO_HEIGHT = 42;
-const LOGO_WIDTH = LOGO_HEIGHT * (399 / 158);
+const LOGO_WIDTH = LOGO_HEIGHT; // square brand mark (public/logoColor.png)
 const DOCUMENTS_DIR = path.join(root, "storage", "documents");
 const KIND = "delivery_docket";
 
@@ -31,9 +31,39 @@ function normalizeText(value) {
   return String(value).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+/** Strip HTML from rich task descriptions for PDF plain text. */
+function htmlToPlainText(value) {
+  if (value == null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (!/<[a-z][\s\S]*>/i.test(raw)) {
+    return normalizeText(raw).replace(/\s+/g, " ").trim();
+  }
+  const withBreaks = raw
+    .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/\s*(p|div|h[1-6]|li|tr)\s*>/gi, "\n")
+    .replace(/<\s*li[^>]*>/gi, "• ");
+  const stripped = withBreaks.replace(/<[^>]+>/g, "");
+  return normalizeText(stripped)
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function display(value) {
   if (value == null || String(value).trim() === "") return "n/a";
   return normalizeText(value);
+}
+
+function displayTaskDesc(value) {
+  const plain = htmlToPlainText(value);
+  if (!plain) return "n/a";
+  return plain;
 }
 
 /** Jul 15 2026 01:09 PM */
@@ -219,7 +249,7 @@ export function renderDeliveryDocketBuffer(docket) {
 
     y = drawSectionTitle(doc, "Description", y);
     doc.font("Helvetica").fontSize(10).fillColor("#000000");
-    doc.text(display(docket.taskDesc), MARGIN, y, { width: CONTENT_WIDTH });
+    doc.text(displayTaskDesc(docket.taskDesc), MARGIN, y, { width: CONTENT_WIDTH });
     y = doc.y + 12;
 
     y = drawSectionTitle(doc, "POD", y);

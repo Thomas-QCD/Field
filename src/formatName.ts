@@ -11,7 +11,7 @@ export function formatShortName(name: string): string {
 	return `${first} ${initial.toUpperCase()}.`;
 }
 
-/** Format each name in a comma-separated list (e.g. API crew/contact aggregates). */
+/** Format each name in a comma-separated list (e.g. API crew aggregates). */
 export function formatShortNameList(names: string): string {
 	return names
 		.split(',')

@@ -15,6 +15,7 @@ def capacitor_pods
   pod 'CapacitorCommunityCameraPreview', :path => '../../node_modules/@capacitor-community/camera-preview'
   pod 'CapacitorMlkitBarcodeScanning', :path => '../../node_modules/@capacitor-mlkit/barcode-scanning'
   pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+  pod 'CapacitorGeolocation', :path => '../../node_modules/@capacitor/geolocation'
   pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
   pod 'CapacitorLocalNotifications', :path => '../../node_modules/@capacitor/local-notifications'
   pod 'CapacitorPreferences', :path => '../../node_modules/@capacitor/preferences'

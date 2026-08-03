@@ -9,19 +9,18 @@
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import pg from "pg";
 import { persistFieldTask } from "../aws/lambdas/_shared/persistFieldTask.mjs";
+import {
+  DATABASE,
+  HOST,
+  PORT,
+  USER,
+  getPassword,
+} from "./lib/db.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
-
-const SECRET_ARN =
-  "arn:aws:secretsmanager:us-west-1:730335210534:secret:rds!db-01f1889d-8922-4311-88c5-3c3f4ffb540b-7lxFSw";
-const HOST = "field-dev.c9saiusmgamc.us-west-1.rds.amazonaws.com";
-const PORT = 5432;
-const DATABASE = "field";
-const USER = "field_admin";
 
 const WODELY_API_KEY =
   process.env.WODELY_API_KEY ||
@@ -52,37 +51,6 @@ if (idsIdx >= 0) skip.add(args[idsIdx + 1]);
 const positional = args.filter(
   (a) => !a.startsWith("--") && !skip.has(a),
 );
-
-function getPassword() {
-  if (process.env.DATABASE_URL) {
-    const url = new URL(process.env.DATABASE_URL);
-    return decodeURIComponent(url.password);
-  }
-  if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
-
-  const raw = execFileSync(
-    "aws",
-    [
-      "secretsmanager",
-      "get-secret-value",
-      "--region",
-      "us-west-1",
-      "--secret-id",
-      SECRET_ARN,
-      "--query",
-      "SecretString",
-      "--output",
-      "text",
-    ],
-    { encoding: "utf8" },
-  ).trim();
-
-  const parsed = JSON.parse(raw);
-  if (!parsed.password) {
-    throw new Error("Secrets Manager payload missing password");
-  }
-  return parsed.password;
-}
 
 function loadTasksFromFile(path) {
   const raw = JSON.parse(readFileSync(path, "utf8"));

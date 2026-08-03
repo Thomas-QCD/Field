@@ -1,0 +1,66 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    16ths of the plate (896 → unit 56). At 16px favicon (plate-cropped):
+      bar = 3 units = 3px · gap = 1 unit = 1px · letter = 11 units = 11px
+    Least bar change from prior ~169px bars (15%×1.1).
+  -->
+  <defs>
+    <!--
+      One compound path + objectBoundingBox so the gradient spans the full F
+      (per-path transforms were sampling only the red end of userSpaceOnUse).
+    -->
+    <linearGradient id="brandGradient" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E31D2D"/>
+      <stop offset="0.45" stop-color="#BC4F9E"/>
+      <stop offset="1" stop-color="#702F8B"/>
+    </linearGradient>
+  </defs>
+
+  <rect
+    x="64"
+    y="64"
+    width="896"
+    height="896"
+    rx="184"
+    fill="#ffffff"/>
+
+  <!--
+    Letter 11u tall cannot center in 16u (would be 2.5u → half-pixel at 16px).
+    Pin to 2u top / 3u bottom so bar edges land on whole pixels.
+  -->
+  <g transform="translate(232 176)">
+    <path
+      fill="url(#brandGradient)"
+      d="
+      M84 0
+      H476
+      A84 84 0 0 1 560 84
+      A84 84 0 0 1 476 168
+      H12
+      A12 12 0 0 1 0 156
+      V84
+      A84 84 0 0 1 84 0
+      Z
+
+      M12 224
+      H308
+      A84 84 0 0 1 392 308
+      A84 84 0 0 1 308 392
+      H12
+      A12 12 0 0 1 0 380
+      V236
+      A12 12 0 0 1 12 224
+      Z
+
+      M12 448
+      H140
+      A84 84 0 0 1 224 532
+      A84 84 0 0 1 140 616
+      H84
+      A84 84 0 0 1 0 532
+      V460
+      A12 12 0 0 1 12 448
+      Z
+      "/>
+  </g>
+</svg>

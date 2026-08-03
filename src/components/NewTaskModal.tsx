@@ -11,11 +11,12 @@ import {
 	Button,
 	Text,
 	SimpleGrid,
-	Loader,
 	Alert,
 	UnstyledButton,
 	Pill,
+	Input,
 } from '@mantine/core';
+import { DateTimePicker } from '@mantine/dates';
 import {
 	ClipboardList,
 	StickyNote,
@@ -29,7 +30,6 @@ import {
 	Plus,
 	Paperclip,
 	Trash2,
-	Search,
 } from 'lucide-react';
 import type { TaskType } from '../types/task';
 import {
@@ -44,6 +44,7 @@ import { KeyboardAwareModal } from './KeyboardAwareModal';
 import { NewContactModal, type NewContactFormValues } from './NewContactModal';
 import { NewAddressModal, type NewAddressFormValues } from './NewAddressModal';
 import { TaskAttachments } from './TaskAttachments';
+import { TaskDescEditor } from './TaskDescEditor';
 
 function formatBytes(bytes: number): string {
 	if (!Number.isFinite(bytes) || bytes < 0) return '';
@@ -67,6 +68,23 @@ const YES_NO_OPTIONS = [
 ];
 
 const inputSize = 'sm' as const;
+
+/** Clear (X) control for TextInput / Textarea — Mantine only wires clearable on select-like inputs. */
+function textClearSection(
+	hasValue: boolean,
+	onClear: () => void,
+	disabled?: boolean,
+) {
+	if (!hasValue || disabled) return undefined;
+	return (
+		<Input.ClearButton
+			onClick={(e) => {
+				e.stopPropagation();
+				onClear();
+			}}
+		/>
+	);
+}
 
 /** Dropdown only after the user types — click/focus on an empty field stays closed. */
 function useTypeToOpenDropdown() {
@@ -96,12 +114,34 @@ function useTypeToOpenDropdown() {
 	};
 }
 
-function defaultDateTimeLocal(): string {
+function defaultDateTimeLocal(hours: number, minutes = 0): string {
 	const d = new Date();
-	d.setSeconds(0, 0);
+	d.setHours(hours, minutes, 0, 0);
 	const pad = (n: number) => String(n).padStart(2, '0');
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/** Form stores datetime-local (`YYYY-MM-DDTHH:mm`); DateTimePicker uses `YYYY-MM-DD HH:mm:ss`. */
+function toDateTimePickerValue(local: string): string | null {
+	const trimmed = local.trim();
+	if (!trimmed) return null;
+	const withSpace = trimmed.includes('T') ? trimmed.replace('T', ' ') : trimmed;
+	if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(withSpace)) {
+		return `${withSpace}:00`;
+	}
+	return withSpace;
+}
+
+function fromDateTimePickerValue(value: string | null): string {
+	if (!value) return '';
+	return value.replace(' ', 'T').slice(0, 16);
+}
+
+const dateTimePickerTimeProps = {
+	withDropdown: true,
+	popoverProps: { withinPortal: false },
+	format: '12h' as const,
+};
 
 export interface NewTaskFormValues {
 	contactIds: number[];
@@ -144,7 +184,6 @@ function withSelectedContactOptions(
 }
 
 function createEmptyForm(): NewTaskFormValues {
-	const now = defaultDateTimeLocal();
 	return {
 		contactIds: [],
 		pocContactId: null,
@@ -156,8 +195,8 @@ function createEmptyForm(): NewTaskFormValues {
 		destinationAddress: '',
 		destinationBuilding: '',
 		destinationNotes: '',
-		afterDateTime: now,
-		beforeDateTime: now,
+		afterDateTime: defaultDateTimeLocal(7),
+		beforeDateTime: defaultDateTimeLocal(15),
 		crewMemberIds: [],
 		guys: '',
 		hours: '',
@@ -291,13 +330,13 @@ export function NewTaskModal({
 			phone: values.phone.trim() || undefined,
 			email: values.email.trim() || undefined,
 		});
-		const shortName = formatShortName(contact.name);
+		const name = contact.name.trim();
 		const title = contact.title.trim();
 		const label = title
-			? `${shortName} (${title})`
+			? `${name} (${title})`
 			: contact.email
-				? `${shortName} (${contact.email})`
-				: shortName;
+				? `${name} (${contact.email})`
+				: name;
 		setContactOptions((prev) => {
 			if (prev.some((o) => o.value === String(contact.id))) return prev;
 			return [...prev, { value: String(contact.id), label }];
@@ -421,15 +460,15 @@ export function NewTaskModal({
 			.then((contacts) => {
 				setContactOptions(
 					contacts.map((c) => {
-						const shortName = formatShortName(c.name);
+						const name = c.name.trim();
 						const title = c.title.trim();
 						return {
 							value: String(c.id),
 							label: title
-								? `${shortName} (${title})`
+								? `${name} (${title})`
 								: c.email
-									? `${shortName} (${c.email})`
-									: shortName,
+									? `${name} (${c.email})`
+									: name,
 						};
 					}),
 				);
@@ -502,8 +541,7 @@ export function NewTaskModal({
 					/>
 					<TextInput
 						size={inputSize}
-						placeholder='Search task'
-						leftSection={<Search size={16} />}
+						placeholder='Job Number'
 						value={form.externalKey}
 						onChange={(e) => update('externalKey', e.currentTarget.value)}
 						maxLength={100}
@@ -511,18 +549,10 @@ export function NewTaskModal({
 					/>
 				</SimpleGrid>
 
-				<Textarea
-					size={inputSize}
-					autosize={true}
-					placeholder='Task information'
-					minRows={2}
-					resize='vertical'
+				<TaskDescEditor
 					value={form.taskDesc}
-					onChange={(e) => update('taskDesc', e.currentTarget.value)}
-					leftSection={<StickyNote size={16} />}
-					leftSectionProps={{
-						style: { alignItems: 'flex-start', paddingTop: 10 },
-					}}
+					onChange={(html) => update('taskDesc', html)}
+					disabled={saving}
 				/>
 
 				<Group justify='space-between' align='center' gap={6} wrap='nowrap'>
@@ -555,7 +585,7 @@ export function NewTaskModal({
 					}}
 					placeholder={form.contactIds.length === 0 ? 'No contacts' : undefined}
 					leftSection={<UserRound size={16} />}
-					rightSection={contactLoading ? <Loader size={14} /> : null}
+					loading={contactLoading}
 					comboboxProps={{ shadow: 'xl' }}
 					maxDropdownHeight={400}
 					styles={{
@@ -655,7 +685,7 @@ export function NewTaskModal({
 						}}
 						placeholder={addressLoading ? 'Loading venues…' : 'Venue'}
 						leftSection={<Building2 size={16} />}
-						rightSection={addressLoading ? <Loader size={14} /> : undefined}
+						loading={addressLoading}
 						clearable
 						openOnFocus={addressDropdown.openOnFocus}
 						dropdownOpened={addressDropdown.dropdownOpened}
@@ -686,6 +716,17 @@ export function NewTaskModal({
 							}));
 						}}
 						leftSection={<MapPin size={16} />}
+						rightSection={textClearSection(
+							form.destinationAddress.length > 0,
+							() =>
+								setForm((prev) => ({
+									...prev,
+									destinationAddress: '',
+									destinationAddressId: null,
+								})),
+							saving,
+						)}
+						rightSectionPointerEvents='auto'
 						disabled={saving}
 					/>
 					<TextInput
@@ -701,10 +742,22 @@ export function NewTaskModal({
 							}));
 						}}
 						leftSection={<Building2 size={16} />}
+						rightSection={textClearSection(
+							form.destinationBuilding.length > 0,
+							() =>
+								setForm((prev) => ({
+									...prev,
+									destinationBuilding: '',
+									destinationAddressId: null,
+								})),
+							saving,
+						)}
+						rightSectionPointerEvents='auto'
 						disabled={saving}
 					/>
 					<Textarea
 						size={inputSize}
+						autosize
 						placeholder='Instructions or notes'
 						minRows={2}
 						resize='vertical'
@@ -721,27 +774,48 @@ export function NewTaskModal({
 						leftSectionProps={{
 							style: { alignItems: 'flex-start', paddingTop: 10 },
 						}}
+						rightSection={textClearSection(
+							form.destinationNotes.length > 0,
+							() =>
+								setForm((prev) => ({
+									...prev,
+									destinationNotes: '',
+									destinationAddressId: null,
+								})),
+							saving,
+						)}
+						rightSectionPointerEvents='auto'
 						disabled={saving}
 					/>
 				</Stack>
 
 				<SimpleGrid cols={{ base: 1, sm: 2 }} spacing={6}>
-					<TextInput
+					<DateTimePicker
 						size={inputSize}
 						label='Complete After'
-						type='datetime-local'
-						value={form.afterDateTime}
-						onChange={(e) => update('afterDateTime', e.currentTarget.value)}
+						valueFormat='dddd, MMMM DD, h:mm A'
+						placeholder='Pick date and time'
+						value={toDateTimePickerValue(form.afterDateTime)}
+						onChange={(v) =>
+							update('afterDateTime', fromDateTimePickerValue(v))
+						}
 						leftSection={<Calendar size={16} />}
+						clearable
+						timePickerProps={dateTimePickerTimeProps}
 						disabled={saving}
 					/>
-					<TextInput
+					<DateTimePicker
 						size={inputSize}
 						label='Complete Before'
-						type='datetime-local'
-						value={form.beforeDateTime}
-						onChange={(e) => update('beforeDateTime', e.currentTarget.value)}
+						valueFormat='dddd, MMMM DD, h:mm A'
+						placeholder='Pick date and time'
+						value={toDateTimePickerValue(form.beforeDateTime)}
+						onChange={(v) =>
+							update('beforeDateTime', fromDateTimePickerValue(v))
+						}
 						leftSection={<Calendar size={16} />}
+						clearable
+						timePickerProps={dateTimePickerTimeProps}
 						disabled={saving}
 					/>
 				</SimpleGrid>
@@ -758,7 +832,7 @@ export function NewTaskModal({
 						form.crewMemberIds.length === 0 ? 'Crew not assigned' : undefined
 					}
 					leftSection={<Users size={16} />}
-					rightSection={crewLoading ? <Loader size={14} /> : null}
+					loading={crewLoading}
 					comboboxProps={{ shadow: 'xl' }}
 					maxDropdownHeight={400}
 					styles={{

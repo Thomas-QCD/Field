@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, expectOk } from './client';
 
 export interface ActivateMobileResult {
 	deviceSessionToken: string;
@@ -22,11 +22,5 @@ export async function activateMobile(
 		}),
 		signal: opts?.signal,
 	});
-	if (!res.ok) {
-		const errBody = (await res.json().catch(() => null)) as {
-			error?: string;
-		} | null;
-		throw new Error(errBody?.error ?? `Activation failed (${res.status})`);
-	}
-	return (await res.json()) as ActivateMobileResult;
+	return expectOk(res, 'Activation failed');
 }

@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { MantineProvider } from '@mantine/core';
 import { provideGlobalGridOptions } from 'ag-grid-community';
 import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
+import '@mantine/tiptap/styles.css';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import './styles/tokens.css';

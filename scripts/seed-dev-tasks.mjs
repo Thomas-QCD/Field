@@ -4,15 +4,7 @@
  * Usage: node scripts/seed-dev-tasks.mjs
  *        node scripts/seed-dev-tasks.mjs --dry-run
  */
-import { execFileSync } from "node:child_process";
-import pg from "pg";
-
-const SECRET_ARN =
-  "arn:aws:secretsmanager:us-west-1:730335210534:secret:rds!db-01f1889d-8922-4311-88c5-3c3f4ffb540b-7lxFSw";
-const HOST = "field-dev.c9saiusmgamc.us-west-1.rds.amazonaws.com";
-const PORT = 5432;
-const DATABASE = "field";
-const USER = "field_admin";
+import { createPgClient } from "./lib/db.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -81,30 +73,6 @@ function pt(local) {
   const d = new Date(`${local}-07:00`);
   if (Number.isNaN(d.getTime())) throw new Error(`bad datetime ${local}`);
   return d.toISOString();
-}
-
-function getPassword() {
-  if (process.env.DATABASE_URL) {
-    return decodeURIComponent(new URL(process.env.DATABASE_URL).password);
-  }
-  if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
-  const raw = execFileSync(
-    "aws",
-    [
-      "secretsmanager",
-      "get-secret-value",
-      "--region",
-      "us-west-1",
-      "--secret-id",
-      SECRET_ARN,
-      "--query",
-      "SecretString",
-      "--output",
-      "text",
-    ],
-    { encoding: "utf8" },
-  ).trim();
-  return JSON.parse(raw).password;
 }
 
 /**
@@ -1490,14 +1458,7 @@ async function main() {
     throw new Error(`Expected 30 seed tasks, got ${TASKS.length}`);
   }
 
-  const client = new pg.Client({
-    host: HOST,
-    port: PORT,
-    database: DATABASE,
-    user: USER,
-    password: getPassword(),
-    ssl: { rejectUnauthorized: false },
-  });
+  const client = createPgClient();
   await client.connect();
 
   try {
@@ -1534,6 +1495,7 @@ async function main() {
     await client.query(`DELETE FROM task_documents`);
     await client.query(`DELETE FROM email_deliveries`);
     await client.query(`DELETE FROM task_crew_events`);
+    await client.query(`DELETE FROM task_history_events`);
     // CASCADE children + tasks
     await client.query(`DELETE FROM tasks`);
 

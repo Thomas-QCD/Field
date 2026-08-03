@@ -14,7 +14,7 @@ Field workforce management — React + TypeScript web app.
 | Bundled Cap build | `npm run cap:sync` · open with `cap:android` / `cap:ios` |
 | Cap → staging API | `npm run cap:staging` |
 
-Everything else (`db:*`, `pdf:docket`, `email:test`, `s3:cors`, `infra:*`, `*:staging`) is occasional — see sections below or run `node scripts/<name>.mjs` directly. Removed npm aliases: `npx vite`, `node server/index.mjs`, `npx vitest run --coverage`, `node scripts/adb-unload.mjs`, `node scripts/apk-serve.mjs`.
+Everything else (`db:*`, `pdf:docket`, `email:test`, `s3:cors`, `infra:*`, `*:staging`, `apk:serve`) is occasional — see sections below or run `node scripts/<name>.mjs` directly. Removed npm aliases: `npx vite`, `node server/index.mjs`, `npx vitest run --coverage`. Clear ADB targets only: `node scripts/adb-unload.mjs`.
 
 ```bash
 npm install

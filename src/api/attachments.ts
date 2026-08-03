@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import type { TaskAttachment } from '../types/task';
-import { apiFetch } from './client';
+import { apiFetch, expectJsonField, expectOk } from './client';
 
 /**
  * Web file-dialog hint. Prefer wildcards so browsers offer both photos and video.
@@ -120,13 +120,10 @@ export async function listAttachments(
 	signal?: AbortSignal,
 ): Promise<TaskAttachment[]> {
 	const res = await apiFetch(`/api/tasks/${taskId}/attachments`, { signal });
-	const data = (await res.json().catch(() => ({}))) as {
-		attachments?: TaskAttachment[];
-		error?: string;
-	};
-	if (!res.ok) {
-		throw new Error(data.error ?? `List attachments failed (${res.status})`);
-	}
+	const data = await expectOk<{ attachments?: TaskAttachment[] }>(
+		res,
+		'List attachments failed',
+	);
 	return data.attachments ?? [];
 }
 
@@ -139,17 +136,7 @@ export async function getAttachmentDownloadUrl(
 	const res = await apiFetch(
 		`/api/tasks/${taskId}/attachments/${attachmentId}/url${params}`,
 	);
-	const data = (await res.json().catch(() => ({}))) as {
-		downloadUrl?: string;
-		error?: string;
-	};
-	if (!res.ok) {
-		throw new Error(data.error ?? `Download URL failed (${res.status})`);
-	}
-	if (!data.downloadUrl) {
-		throw new Error('Download URL failed: empty response');
-	}
-	return data.downloadUrl;
+	return expectJsonField(res, 'downloadUrl', 'Download URL failed');
 }
 
 export async function deleteAttachment(
@@ -160,10 +147,7 @@ export async function deleteAttachment(
 		`/api/tasks/${taskId}/attachments/${attachmentId}`,
 		{ method: 'DELETE' },
 	);
-	if (!res.ok) {
-		const data = (await res.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Delete attachment failed (${res.status})`);
-	}
+	await expectOk(res, 'Delete attachment failed');
 }
 
 interface PresignResult {
@@ -190,16 +174,11 @@ async function presignAttachment(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-	const data = (await res.json().catch(() => ({}))) as PresignResult & {
-		error?: string;
-	};
-	if (!res.ok) {
-		throw new Error(data.error ?? `Presign failed (${res.status})`);
-	}
+	const data = await expectOk<Partial<PresignResult>>(res, 'Presign failed');
 	if (!data.uploadUrl || !data.storageKey) {
 		throw new Error('Presign failed: empty response');
 	}
-	return data;
+	return data as PresignResult;
 }
 
 async function confirmAttachment(
@@ -218,17 +197,7 @@ async function confirmAttachment(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-	const data = (await res.json().catch(() => ({}))) as {
-		attachment?: TaskAttachment;
-		error?: string;
-	};
-	if (!res.ok) {
-		throw new Error(data.error ?? `Confirm attachment failed (${res.status})`);
-	}
-	if (!data.attachment) {
-		throw new Error('Confirm attachment failed: empty response');
-	}
-	return data.attachment;
+	return expectJsonField(res, 'attachment', 'Confirm attachment failed');
 }
 
 /**

@@ -20,10 +20,6 @@ function getClient() {
   return client;
 }
 
-export function getBucketName() {
-  return BUCKET;
-}
-
 /**
  * @param {string} fileName
  */

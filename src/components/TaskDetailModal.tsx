@@ -25,9 +25,14 @@ import { getTask, openDeliveryDocket, updateTaskStatus } from '../api/tasks';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { formatShortName } from '../formatName';
 import { formatTimeAgo } from '../formatTime';
+import { isEmptyTaskDesc } from '../taskDescHtml';
 import type { TaskDetail, TaskStatus } from '../types/task';
+import { statusTransitionsFor } from '../../shared/statusTransitions.js';
 import { KeyboardAwareModal } from './KeyboardAwareModal';
+import { TaskDescHtml } from './TaskDescHtml';
 import { TaskAttachments } from './TaskAttachments';
+import { TaskHistory } from './TaskHistory';
+import { TaskStartedCrew } from './TaskStartedCrew';
 import { TaskStatusBadge } from './TaskStatusBadge';
 
 interface TaskDetailModalProps {
@@ -38,38 +43,6 @@ interface TaskDetailModalProps {
 	onDelete?: (task: TaskDetail) => Promise<void>;
 	onRestore?: (task: TaskDetail) => Promise<void>;
 	onStatusChange?: (task: { id: number; status: TaskStatus }) => void;
-}
-
-/** Mirrors server/createTask.mjs STATUS_TRANSITIONS (admin / manual). */
-const STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-	Unassigned: ['Assigned'],
-	Assigned: ['Loaded', 'In Progress', 'Failed'],
-	Loaded: ['In Progress', 'Failed'],
-	'In Progress': ['Completed', 'Failed', 'Undetermined'],
-	Completed: ['In Progress'],
-	Failed: [],
-	Undetermined: [],
-	Cancelled: [],
-};
-
-/** Delivery: Loaded plays the same role as In Progress for other task types. */
-const DELIVERY_STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-	Unassigned: ['Assigned'],
-	Assigned: ['Loaded', 'Failed'],
-	Loaded: ['Completed', 'Failed', 'Undetermined'],
-	'In Progress': ['Completed', 'Failed', 'Undetermined'],
-	Completed: ['Loaded'],
-	Failed: [],
-	Undetermined: [],
-	Cancelled: [],
-};
-
-function statusTransitionsFor(
-	taskType: string | undefined,
-): Record<TaskStatus, TaskStatus[]> {
-	return taskType === 'Delivery'
-		? DELIVERY_STATUS_TRANSITIONS
-		: STATUS_TRANSITIONS;
 }
 
 function formatDateTime(value: string | null): string {
@@ -347,8 +320,9 @@ export function TaskDetailModal({
 		}
 	};
 
-	const statusOptions = task
-		? (statusTransitionsFor(task.taskType)[task.status] ?? [])
+	const statusOptions: TaskStatus[] = task
+		? ((statusTransitionsFor(task.taskType)[task.status] ??
+				[]) as TaskStatus[])
 		: [];
 
 	const title =
@@ -422,12 +396,12 @@ export function TaskDetailModal({
 			centered
 			classNames={{
 				content: 'task-detail-modal',
+				header: 'task-detail-modal-header',
 				body: 'task-detail-modal-body',
 			}}
 			styles={{
 				title: { fontWeight: 700 },
-				body: { paddingTop: 8 },
-				header: { minHeight: 0, paddingBottom: 8 },
+				header: { minHeight: 0 },
 			}}
 		>
 			{loading ? (
@@ -441,22 +415,22 @@ export function TaskDetailModal({
 			) : task ? (
 				<>
 					<div className='task-detail-scroll'>
-						<Stack gap='lg'>
-							{task.status === 'Cancelled' && task.cancelledAt ? (
-								<Alert color='orange' title='Cancelled'>
-									Scheduled for permanent removal on{' '}
-									{formatDateTime(
-										new Date(
-											new Date(task.cancelledAt).getTime() +
-												7 * 24 * 60 * 60 * 1000,
-										).toISOString(),
-									)}
-									.
-								</Alert>
-							) : null}
+						<Stack gap='lg' className='task-detail-scroll-stack'>
 							<div className='task-detail-layout'>
 								<div className='task-detail-main'>
 									<Stack gap='lg'>
+										{task.status === 'Cancelled' && task.cancelledAt ? (
+											<Alert color='orange' title='Cancelled'>
+												Scheduled for permanent removal on{' '}
+												{formatDateTime(
+													new Date(
+														new Date(task.cancelledAt).getTime() +
+															7 * 24 * 60 * 60 * 1000,
+													).toISOString(),
+												)}
+												.
+											</Alert>
+										) : null}
 										{showCompletionCallout ? (
 											<Stack gap='sm'>
 												{pendingOutcome ? (
@@ -493,8 +467,8 @@ export function TaskDetailModal({
 																	onClick={() => void handleSaveOutcome()}
 																>
 																	{pendingOutcome === 'Failed'
-																		? 'Save failed task'
-																		: 'Save completed task'}
+																		? 'Complete'
+																		: 'Mark Failed'}
 																</Button>
 																<Button
 																	variant='default'
@@ -561,6 +535,11 @@ export function TaskDetailModal({
 											</Stack>
 										) : null}
 
+										<TaskStartedCrew
+											status={task.status}
+											crewMembers={task.crewMembers}
+										/>
+
 										<DetailFields>
 											<DetailField
 												label='Created by'
@@ -570,11 +549,15 @@ export function TaskDetailModal({
 														: ''
 												}
 											/>
-											{task.description ? (
-												<DetailField
-													label='Description'
-													value={task.description}
-												/>
+											{!isEmptyTaskDesc(task.description) ? (
+												<>
+													<dt className='task-detail-field-key'>
+														Description
+													</dt>
+													<dd className='task-detail-field-value'>
+														<TaskDescHtml value={task.description} />
+													</dd>
+												</>
 											) : null}
 											<DetailField
 												label='Crew'
@@ -602,7 +585,7 @@ export function TaskDetailModal({
 															</dt>
 															<dd className='task-detail-field-value'>
 																<span className='task-detail-contact-name'>
-																	{formatShortName(contact.name)}
+																	{contact.name}
 																</span>
 																{contact.title.trim() ? (
 																	<span className='task-detail-contact-title'>
@@ -717,16 +700,17 @@ export function TaskDetailModal({
 								</div>
 
 								<aside className='task-detail-attachments'>
-									<Section
-										label='Attachments'
-										className='task-detail-attachments-section'
-									>
+									<div className='task-detail-attachments-section'>
 										<TaskAttachments
 											taskId={task.id}
 											initialAttachments={task.attachments}
 											variant='plain'
 										/>
-									</Section>
+									</div>
+									<TaskHistory
+										taskId={task.id}
+										refreshKey={`${task.status}:${task.updatedAt}`}
+									/>
 								</aside>
 							</div>
 

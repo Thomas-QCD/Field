@@ -1,11 +1,14 @@
 import { Button, Center, Stack, Text, Title } from '@mantine/core';
 import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
+import { BrandLogo } from '../components/BrandLogo';
+import { useDocumentTitle } from '../documentTitle';
 import { loginRequest } from './msalConfig';
 
 export function LoginPage() {
 	const { instance, inProgress } = useMsal();
 	const busy = inProgress !== InteractionStatus.None;
+	useDocumentTitle('Sign in');
 
 	const onSignIn = () => {
 		void instance.loginRedirect(loginRequest);
@@ -21,7 +24,8 @@ export function LoginPage() {
 			}}
 		>
 			<Stack gap='lg' maw={400} w='100%' align='stretch'>
-				<Stack gap={6}>
+				<Stack gap={6} align='flex-start'>
+					<BrandLogo size={72} />
 					<Title
 						order={1}
 						fz='2.75rem'

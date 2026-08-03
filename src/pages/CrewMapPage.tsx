@@ -10,6 +10,7 @@ import {
 	type CrewLocation,
 } from '../api/crewLocations';
 import { useCurrentUser } from '../context/CurrentUserContext';
+import { htmlToPlainText } from '../taskDescHtml';
 
 /** Downtown Las Vegas — hard-coded for MVP. */
 const LAS_VEGAS_CENTER: [number, number] = [36.1699, -115.1398];
@@ -75,7 +76,9 @@ function CrewMapMarkers({ locations }: { locations: CrewLocation[] }) {
 							</div>
 							<div>
 								Task #{loc.taskId}
-								{loc.taskDesc ? ` — ${loc.taskDesc}` : ''}
+								{loc.taskDesc
+									? ` — ${htmlToPlainText(loc.taskDesc)}`
+									: ''}
 							</div>
 							{loc.accuracyMeters != null ? (
 								<div>±{Math.round(loc.accuracyMeters)} m</div>

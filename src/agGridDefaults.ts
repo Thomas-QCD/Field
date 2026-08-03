@@ -6,6 +6,7 @@ import { TaskStatusBadge } from './components/TaskStatusBadge';
 import type { Task, TaskStatus } from './types/task';
 import { formatShortName } from './formatName';
 import { formatTimeAgo } from './formatTime';
+import { htmlToPlainText } from './taskDescHtml';
 
 /**
  * Mobile breakpoint for AG Grid pages — matches AppShell `sm`
@@ -201,7 +202,10 @@ const taskColumnDefsBase: ColDef<Task>[] = [
 	{
 		field: 'description',
 		headerName: 'Description',
-		valueFormatter: emptyDash,
+		valueFormatter: (p: ValueFormatterParams<Task, string>) => {
+			const plain = htmlToPlainText(p.value ?? '');
+			return plain || '—';
+		},
 		minWidth: 140,
 		flex: 1.4,
 	},

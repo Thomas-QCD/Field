@@ -21,9 +21,15 @@ import {
 } from '../api/attachments';
 import { MultiShotCamera } from '../components/MultiShotCamera';
 import { TaskAttachments } from '../components/TaskAttachments';
+import { TaskDescHtml } from '../components/TaskDescHtml';
+import { TaskHistory } from '../components/TaskHistory';
+import { captureRequiredGeo } from '../captureGeo';
+import { TaskStartedCrew } from '../components/TaskStartedCrew';
 import { TaskStatusBadge } from '../components/TaskStatusBadge';
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { getDeliveryMode } from '../deliveryMode';
+import { useDocumentTitle } from '../documentTitle';
+import { isEmptyTaskDesc } from '../taskDescHtml';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
@@ -62,7 +68,7 @@ function ContactBlock({ contact }: { contact: TaskContact }) {
 		>
 			<div className='task-view-contact-info'>
 				<div className='task-view-contact-name'>
-					<span>{formatShortName(contact.name)}</span>
+					<span>{contact.name}</span>
 					{contact.isPoc ? (
 						<span className='task-view-contact-poc'>POC</span>
 					) : null}
@@ -222,34 +228,6 @@ function isTerminalStatus(status: TaskStatus): boolean {
 		status === 'Undetermined' ||
 		status === 'Cancelled'
 	);
-}
-
-async function captureGeo(): Promise<{
-	latitude?: number;
-	longitude?: number;
-	accuracyMeters?: number;
-	recordedAt: string;
-}> {
-	const recordedAt = new Date().toISOString();
-	if (!navigator.geolocation) return { recordedAt };
-
-	try {
-		const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-			navigator.geolocation.getCurrentPosition(resolve, reject, {
-				enableHighAccuracy: true,
-				timeout: 5000,
-				maximumAge: 30_000,
-			});
-		});
-		return {
-			latitude: pos.coords.latitude,
-			longitude: pos.coords.longitude,
-			accuracyMeters: pos.coords.accuracy,
-			recordedAt,
-		};
-	} catch {
-		return { recordedAt };
-	}
 }
 
 function TaskViewBody({
@@ -450,6 +428,11 @@ function TaskViewBody({
 				/>
 			</div>
 
+			<TaskStartedCrew
+				status={task.status}
+				crewMembers={task.crewMembers}
+			/>
+
 			<div className='task-view-field'>
 				<span className='task-view-field-label'>Contacts</span>
 				{task.contacts.length === 0 ? (
@@ -536,14 +519,22 @@ function TaskViewBody({
 				<Field label='Failed reason' value={task.failedReason} />
 			) : null}
 
-			{task.description ? (
-				<p className='task-view-description'>{task.description}</p>
+			{!isEmptyTaskDesc(task.description) ? (
+				<TaskDescHtml
+					value={task.description}
+					className='task-view-description'
+				/>
 			) : null}
 
 			<TaskAttachments
 				taskId={task.id}
 				initialAttachments={task.attachments}
 				variant='plain'
+			/>
+
+			<TaskHistory
+				taskId={task.id}
+				refreshKey={`${task.status}:${task.updatedAt}`}
 			/>
 		</div>
 	);
@@ -559,6 +550,10 @@ export function TaskViewPage() {
 	const [task, setTask] = useState<TaskDetail | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+
+	useDocumentTitle(
+		task?.externalKey ? `#${task.externalKey}` : task ? 'Task' : null,
+	);
 
 	const goBack = () => {
 		// First load / deep link has no in-app history to pop.
@@ -603,13 +598,13 @@ export function TaskViewPage() {
 		if (!task || !user) {
 			throw new Error('Select a user before starting or ending a task');
 		}
-		const geo = await captureGeo();
+		const geo = await captureRequiredGeo();
 		const { event, task: updated } = await createCrewEvent(task.id, {
 			userId: user.id,
 			eventType,
-			latitude: geo.latitude ?? null,
-			longitude: geo.longitude ?? null,
-			accuracyMeters: geo.accuracyMeters ?? null,
+			latitude: geo.latitude,
+			longitude: geo.longitude,
+			accuracyMeters: geo.accuracyMeters,
 			recordedAt: geo.recordedAt,
 		});
 		setTask((prev) =>

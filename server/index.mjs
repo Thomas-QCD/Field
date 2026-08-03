@@ -16,6 +16,7 @@ import {
 } from "./auth.mjs";
 import { getPool } from "./db.mjs";
 import { createCrewEvent, createTask, updateTask, updateTaskStatus, listCompletionNotes, endOpenCrewStarts } from "./createTask.mjs";
+import { getTaskHistory, recordTaskHistoryEvent } from "./taskHistory.mjs";
 import {
   activateMobileDevice,
   issueActivationCode,
@@ -257,7 +258,7 @@ async function getAddress(id) {
 /**
  * @param {unknown} body
  */
-async function createContact(body) {
+function parseContactBody(body) {
   const name =
     body && typeof body === "object" && "name" in body
       ? String(body.name ?? "").trim()
@@ -300,6 +301,15 @@ async function createContact(body) {
       status: 400,
     });
   }
+
+  return { name, title, phone, email };
+}
+
+/**
+ * @param {unknown} body
+ */
+async function createContact(body) {
+  const { name, title, phone, email } = parseContactBody(body);
 
   const pool = getPool();
   const { rows } = await pool.query(
@@ -316,48 +326,7 @@ async function createContact(body) {
  * @param {unknown} body
  */
 async function updateContact(id, body) {
-  const name =
-    body && typeof body === "object" && "name" in body
-      ? String(body.name ?? "").trim()
-      : "";
-  if (!name) {
-    throw Object.assign(new Error("name is required"), { status: 400 });
-  }
-  if (name.length > 255) {
-    throw Object.assign(new Error("name must be 255 characters or fewer"), {
-      status: 400,
-    });
-  }
-
-  const title =
-    body && typeof body === "object" && "title" in body
-      ? String(body.title ?? "").trim() || null
-      : null;
-  if (title && title.length > 255) {
-    throw Object.assign(new Error("title must be 255 characters or fewer"), {
-      status: 400,
-    });
-  }
-
-  const phone =
-    body && typeof body === "object" && "phone" in body
-      ? String(body.phone ?? "").trim() || null
-      : null;
-  if (phone && phone.length > 50) {
-    throw Object.assign(new Error("phone must be 50 characters or fewer"), {
-      status: 400,
-    });
-  }
-
-  const email =
-    body && typeof body === "object" && "email" in body
-      ? String(body.email ?? "").trim() || null
-      : null;
-  if (email && email.length > 255) {
-    throw Object.assign(new Error("email must be 255 characters or fewer"), {
-      status: 400,
-    });
-  }
+  const { name, title, phone, email } = parseContactBody(body);
 
   const pool = getPool();
   const { rows } = await pool.query(
@@ -399,7 +368,7 @@ async function deleteContact(id) {
 /**
  * @param {unknown} body
  */
-async function createAddress(body) {
+function parseAddressBody(body) {
   const addressName =
     body && typeof body === "object" && "addressName" in body
       ? String(body.addressName ?? "").trim() || null
@@ -439,6 +408,15 @@ async function createAddress(body) {
     body && typeof body === "object" && "notes" in body
       ? String(body.notes ?? "").trim() || null
       : null;
+
+  return { addressName, streetLine, building, notes };
+}
+
+/**
+ * @param {unknown} body
+ */
+async function createAddress(body) {
+  const { addressName, streetLine, building, notes } = parseAddressBody(body);
 
   const pool = getPool();
   const { rows } = await pool.query(
@@ -455,45 +433,7 @@ async function createAddress(body) {
  * @param {unknown} body
  */
 async function updateAddress(id, body) {
-  const addressName =
-    body && typeof body === "object" && "addressName" in body
-      ? String(body.addressName ?? "").trim() || null
-      : null;
-  if (addressName && addressName.length > 255) {
-    throw Object.assign(
-      new Error("addressName must be 255 characters or fewer"),
-      { status: 400 },
-    );
-  }
-
-  const streetLine =
-    body && typeof body === "object" && "streetLine" in body
-      ? String(body.streetLine ?? "").trim()
-      : "";
-  if (!streetLine) {
-    throw Object.assign(new Error("streetLine is required"), { status: 400 });
-  }
-  if (streetLine.length > 500) {
-    throw Object.assign(
-      new Error("streetLine must be 500 characters or fewer"),
-      { status: 400 },
-    );
-  }
-
-  const building =
-    body && typeof body === "object" && "building" in body
-      ? String(body.building ?? "").trim() || null
-      : null;
-  if (building && building.length > 255) {
-    throw Object.assign(new Error("building must be 255 characters or fewer"), {
-      status: 400,
-    });
-  }
-
-  const notes =
-    body && typeof body === "object" && "notes" in body
-      ? String(body.notes ?? "").trim() || null
-      : null;
+  const { addressName, streetLine, building, notes } = parseAddressBody(body);
 
   const pool = getPool();
   const { rows } = await pool.query(
@@ -560,6 +500,7 @@ async function cancelTask(id) {
 
     await endOpenCrewStarts(client, id);
 
+    const fromStatus = existing.rows[0].status;
     const { rowCount } = await client.query(
       `UPDATE tasks
        SET status_before_cancel = status,
@@ -574,6 +515,14 @@ async function cancelTask(id) {
     if (rowCount === 0) {
       throw Object.assign(new Error("Task not found"), { status: 404 });
     }
+
+    await recordTaskHistoryEvent(client, {
+      taskId: id,
+      eventType: "status_changed",
+      fromStatus,
+      toStatus: "Cancelled",
+      summary: "Task cancelled",
+    });
 
     await client.query("COMMIT");
   } catch (err) {
@@ -624,6 +573,14 @@ async function restoreTask(id) {
        RETURNING id, status`,
       [id],
     );
+
+    await recordTaskHistoryEvent(client, {
+      taskId: id,
+      eventType: "restored",
+      fromStatus: "Cancelled",
+      toStatus: "Undetermined",
+      summary: "Task restored",
+    });
 
     await client.query("COMMIT");
 
@@ -1245,6 +1202,15 @@ const server = createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const result = await createCrewEvent(Number(crewEventsMatch[1]), body);
       sendJson(res, result, 201);
+      return;
+    }
+
+    const taskHistoryMatch = url.pathname.match(
+      /^\/api\/tasks\/(\d+)\/history$/,
+    );
+    if (req.method === "GET" && taskHistoryMatch) {
+      const events = await getTaskHistory(Number(taskHistoryMatch[1]));
+      sendJson(res, { events });
       return;
     }
 

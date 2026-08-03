@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, expectJsonField, expectOk } from './client';
 
 export interface AppUser {
 	id: string;
@@ -24,10 +24,7 @@ async function fetchUsers(
 	if (role) params.set('role', role);
 	const qs = params.toString();
 	const res = await apiFetch(`/api/users${qs ? `?${qs}` : ''}`, { signal });
-	if (!res.ok) {
-		throw new Error(`Users list failed (${res.status})`);
-	}
-	const data = (await res.json()) as { users: AppUser[] };
+	const data = await expectOk<{ users?: AppUser[] }>(res, 'Users list failed');
 	return data.users ?? [];
 }
 
@@ -47,14 +44,7 @@ export async function syncSession(signal?: AbortSignal): Promise<AppUser> {
 		body: '{}',
 		signal,
 	});
-	if (!res.ok) {
-		const body = (await res.json().catch(() => null)) as {
-			error?: string;
-		} | null;
-		throw new Error(body?.error ?? `Session sync failed (${res.status})`);
-	}
-	const data = (await res.json()) as { user: AppUser };
-	return data.user;
+	return expectJsonField(res, 'user', 'Session sync failed');
 }
 
 /** Issue a single-use mobile activation QR payload for a user. */
@@ -72,15 +62,7 @@ export async function issueMobileActivation(
 		body: JSON.stringify(body),
 		signal: opts?.signal,
 	});
-	if (!res.ok) {
-		const errBody = (await res.json().catch(() => null)) as {
-			error?: string;
-		} | null;
-		throw new Error(
-			errBody?.error ?? `Issue activation failed (${res.status})`,
-		);
-	}
-	return (await res.json()) as MobileActivation;
+	return expectOk(res, 'Issue activation failed');
 }
 
 export interface MobileDevice {
@@ -109,15 +91,10 @@ export async function listMobileDevices(
 		`/api/users/${userId}/mobile-devices${qs ? `?${qs}` : ''}`,
 		{ signal: opts?.signal },
 	);
-	if (!res.ok) {
-		const errBody = (await res.json().catch(() => null)) as {
-			error?: string;
-		} | null;
-		throw new Error(
-			errBody?.error ?? `List mobile devices failed (${res.status})`,
-		);
-	}
-	const data = (await res.json()) as { devices: MobileDevice[] };
+	const data = await expectOk<{ devices?: MobileDevice[] }>(
+		res,
+		'List mobile devices failed',
+	);
 	return data.devices ?? [];
 }
 
@@ -140,16 +117,7 @@ export async function revokeMobileDevice(
 			signal: opts?.signal,
 		},
 	);
-	if (!res.ok) {
-		const errBody = (await res.json().catch(() => null)) as {
-			error?: string;
-		} | null;
-		throw new Error(
-			errBody?.error ?? `Revoke device failed (${res.status})`,
-		);
-	}
-	const data = (await res.json()) as { device: MobileDevice };
-	return data.device;
+	return expectJsonField(res, 'device', 'Revoke device failed');
 }
 
 /** Revoke all active mobile device sessions for a user. */
@@ -167,13 +135,5 @@ export async function revokeAllMobileDevices(
 		body: JSON.stringify(body),
 		signal: opts?.signal,
 	});
-	if (!res.ok) {
-		const errBody = (await res.json().catch(() => null)) as {
-			error?: string;
-		} | null;
-		throw new Error(
-			errBody?.error ?? `Revoke all devices failed (${res.status})`,
-		);
-	}
-	return (await res.json()) as { revokedCount: number };
+	return expectOk(res, 'Revoke all devices failed');
 }

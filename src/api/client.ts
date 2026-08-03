@@ -94,5 +94,70 @@ export async function apiFetch(
 		}
 	}
 
+	// Web Entra: one retry with a forced token refresh (stale ID token cache).
+	if (
+		res.status === 401 &&
+		!Capacitor.isNativePlatform() &&
+		accessTokenProvider &&
+		!headers.has('X-Field-Auth-Retry')
+	) {
+		try {
+			const { getMsalInstance } = await import('../auth/msalConfig');
+			const { acquireIdToken } = await import('../auth/token');
+			const instance = getMsalInstance();
+			const account =
+				instance.getActiveAccount() ?? instance.getAllAccounts()[0];
+			if (account) {
+				const fresh = await acquireIdToken(instance, account, {
+					forceRefresh: true,
+				});
+				headers.set('Authorization', `Bearer ${fresh}`);
+				headers.set('X-Field-Auth-Retry', '1');
+				return await fetch(url, { ...init, headers });
+			}
+		} catch (err) {
+			console.error('[auth] 401 retry refresh failed', err);
+		}
+	}
+
 	return res;
+}
+
+type ErrorBody = { error?: string };
+
+/** Parse JSON body; empty object on failure. */
+export async function readJson<T>(res: Response): Promise<T> {
+	return (await res.json().catch(() => ({}))) as T;
+}
+
+/**
+ * Throw when `!res.ok`, using `data.error` when present.
+ * Returns the parsed JSON body on success.
+ */
+export async function expectOk<T extends object>(
+	res: Response,
+	fallback: string,
+): Promise<T> {
+	const data = await readJson<T & ErrorBody>(res);
+	if (!res.ok) {
+		throw new Error(data.error ?? `${fallback} (${res.status})`);
+	}
+	return data;
+}
+
+/** Like expectOk, then require a named field (throws if missing). */
+export async function expectJsonField<T>(
+	res: Response,
+	field: string,
+	fallback: string,
+): Promise<T> {
+	const data = await expectOk<Record<string, T | undefined> & ErrorBody>(
+		res,
+		fallback,
+	);
+	const value = data[field];
+	if (value == null) {
+		throw new Error(`${fallback}: empty response`);
+	}
+	return value;
 }

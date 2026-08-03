@@ -9,7 +9,7 @@ import {
 	Text,
 	UnstyledButton,
 } from '@mantine/core';
-import { Download, Film, Paperclip, Trash2 } from 'lucide-react';
+import { ChevronDown, Download, Film, Paperclip, Trash2 } from 'lucide-react';
 import {
 	attachmentAcceptAttr,
 	deleteAttachment,
@@ -66,6 +66,7 @@ export function TaskAttachments({
 	const [uploading, setUploading] = useState(false);
 	const [busyId, setBusyId] = useState<number | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [expanded, setExpanded] = useState(false);
 	/** Signed inline URLs for previewable attachments */
 	const [previewUrls, setPreviewUrls] = useState<Record<number, string>>({});
 	const [previewLoading, setPreviewLoading] = useState(false);
@@ -73,6 +74,12 @@ export function TaskAttachments({
 	previewUrlsRef.current = previewUrls;
 	const [viewerAttachment, setViewerAttachment] =
 		useState<TaskAttachment | null>(null);
+
+	const canExpand = attachments.length > 0;
+
+	useEffect(() => {
+		if (!canExpand && expanded) setExpanded(false);
+	}, [canExpand, expanded]);
 
 	useEffect(() => {
 		setAttachments(initialAttachments ?? []);
@@ -326,146 +333,186 @@ export function TaskAttachments({
 
 	if (previewMode) {
 		return (
-			<section className='task-view-attachments' aria-label='Attachments'>
-				<div className='task-attachments task-attachments--preview'>
-					{errorAlert}
+			<section
+				className={
+					expanded
+						? 'task-view-attachments'
+						: 'task-view-attachments task-view-attachments--collapsed'
+				}
+				aria-label={`Attachments (${attachments.length})`}
+			>
+				<button
+					type='button'
+					className='task-attachments-toggle'
+					aria-expanded={expanded}
+					disabled={!canExpand}
+					title={canExpand ? undefined : 'No attachments yet'}
+					onClick={() => {
+						if (!canExpand) return;
+						setExpanded((prev) => !prev);
+					}}
+				>
+					<span className='task-attachments-toggle-label'>
+						Attachments ({attachments.length})
+					</span>
+					<ChevronDown
+						size={18}
+						strokeWidth={2}
+						aria-hidden
+						className={
+							expanded
+								? 'task-attachments-toggle-icon'
+								: 'task-attachments-toggle-icon task-attachments-toggle-icon--collapsed'
+						}
+					/>
+				</button>
 
-					<div className='task-attachments-scroll'>
-						{loading ? (
-							<Group justify='center' py='sm'>
-								<Loader size='sm' />
-							</Group>
-						) : (
-							<>
-								{viewable.length > 0 ? (
-									<div className='task-attachments-preview-stack'>
-										{previewLoading &&
-										viewable.some((a) => !previewUrls[a.id]) ? (
-											<Group justify='center' py='xs'>
-												<Loader size='xs' />
-											</Group>
-										) : null}
-										{viewable.map((attachment) => {
-											const url = previewUrls[attachment.id];
-											const label =
-												attachment.fileName ?? `Attachment #${attachment.id}`;
-											const busy = busyId === attachment.id;
-											const openViewer = () => {
-												if (url) setViewerAttachment(attachment);
-											};
+				{expanded ? (
+					<div className='task-attachments task-attachments--preview'>
+						{errorAlert}
 
-											return (
-												<figure
-													key={attachment.id}
-													className='task-attachments-preview'
-												>
-													{url ? (
-														<div
-															role='button'
-															tabIndex={0}
-															className='task-attachments-preview-open'
-															aria-label={`View ${label}`}
-															onClick={openViewer}
-															onKeyDown={(e) => {
-																if (e.key === 'Enter' || e.key === ' ') {
-																	e.preventDefault();
-																	openViewer();
-																}
-															}}
-														>
-															{attachment.mimeType.startsWith('image/') ? (
-																<img
-																	src={url}
-																	alt=''
-																	className='task-attachments-preview-media'
-																/>
-															) : isVideoMime(attachment.mimeType) ? (
-																<div
-																	className='task-attachments-preview-media task-attachments-preview-video'
-																	aria-hidden
+						<div className='task-attachments-scroll'>
+							{loading ? (
+								<Group justify='center' py='sm'>
+									<Loader size='sm' />
+								</Group>
+							) : (
+								<>
+									{viewable.length > 0 ? (
+										<div className='task-attachments-preview-stack'>
+											{previewLoading &&
+											viewable.some((a) => !previewUrls[a.id]) ? (
+												<Group justify='center' py='xs'>
+													<Loader size='xs' />
+												</Group>
+											) : null}
+											{viewable.map((attachment) => {
+												const url = previewUrls[attachment.id];
+												const label =
+													attachment.fileName ??
+													`Attachment #${attachment.id}`;
+												const busy = busyId === attachment.id;
+												const openViewer = () => {
+													if (url) setViewerAttachment(attachment);
+												};
+
+												return (
+													<figure
+														key={attachment.id}
+														className='task-attachments-preview'
+													>
+														{url ? (
+															<div
+																role='button'
+																tabIndex={0}
+																className='task-attachments-preview-open'
+																aria-label={`View ${label}`}
+																onClick={openViewer}
+																onKeyDown={(e) => {
+																	if (e.key === 'Enter' || e.key === ' ') {
+																		e.preventDefault();
+																		openViewer();
+																	}
+																}}
+															>
+																{attachment.mimeType.startsWith('image/') ? (
+																	<img
+																		src={url}
+																		alt=''
+																		className='task-attachments-preview-media'
+																	/>
+																) : isVideoMime(attachment.mimeType) ? (
+																	<div
+																		className='task-attachments-preview-media task-attachments-preview-video'
+																		aria-hidden
+																	>
+																		<Film size={40} strokeWidth={1.75} />
+																		<span>Video</span>
+																	</div>
+																) : attachment.mimeType ===
+																  'application/pdf' ? (
+																	<PdfPreview
+																		url={url}
+																		title={label}
+																		className='task-attachments-preview-pdf'
+																	/>
+																) : (
+																	<iframe
+																		title={label}
+																		src={url}
+																		className='task-attachments-preview-text'
+																		tabIndex={-1}
+																	/>
+																)}
+															</div>
+														) : (
+															<div className='task-attachments-preview-placeholder'>
+																<Loader size='xs' />
+															</div>
+														)}
+														<figcaption className='task-attachments-preview-caption'>
+															<button
+																type='button'
+																className='task-attachments-preview-name'
+																onClick={openViewer}
+																disabled={!url}
+															>
+																{label}
+															</button>
+															<Group gap={4} wrap='nowrap'>
+																<UnstyledButton
+																	className='task-attachments-icon-btn'
+																	aria-label='Download'
+																	disabled={busy || uploading}
+																	onClick={() =>
+																		void handleDownload(attachment)
+																	}
 																>
-																	<Film size={40} strokeWidth={1.75} />
-																	<span>Video</span>
-																</div>
-															) : attachment.mimeType === 'application/pdf' ? (
-																<PdfPreview
-																	url={url}
-																	title={label}
-																	className='task-attachments-preview-pdf'
-																/>
-															) : (
-																<iframe
-																	title={label}
-																	src={url}
-																	className='task-attachments-preview-text'
-																	tabIndex={-1}
-																/>
-															)}
-														</div>
-													) : (
-														<div className='task-attachments-preview-placeholder'>
-															<Loader size='xs' />
-														</div>
-													)}
-													<figcaption className='task-attachments-preview-caption'>
-														<button
-															type='button'
-															className='task-attachments-preview-name'
-															onClick={openViewer}
-															disabled={!url}
-														>
-															{label}
-														</button>
-														<Group gap={4} wrap='nowrap'>
-															<UnstyledButton
-																className='task-attachments-icon-btn'
-																aria-label='Download'
-																disabled={busy || uploading}
-																onClick={() => void handleDownload(attachment)}
-															>
-																<Download
-																	size={16}
-																	strokeWidth={2}
-																	aria-hidden
-																/>
-															</UnstyledButton>
-															<UnstyledButton
-																className='task-attachments-icon-btn task-attachments-icon-btn--danger'
-																aria-label='Delete'
-																disabled={busy || uploading}
-																onClick={() => void handleDelete(attachment)}
-															>
-																<Trash2
-																	size={16}
-																	strokeWidth={2}
-																	aria-hidden
-																/>
-															</UnstyledButton>
-														</Group>
-													</figcaption>
-												</figure>
-											);
-										})}
-									</div>
-								) : null}
+																	<Download
+																		size={16}
+																		strokeWidth={2}
+																		aria-hidden
+																	/>
+																</UnstyledButton>
+																<UnstyledButton
+																	className='task-attachments-icon-btn task-attachments-icon-btn--danger'
+																	aria-label='Delete'
+																	disabled={busy || uploading}
+																	onClick={() =>
+																		void handleDelete(attachment)
+																	}
+																>
+																	<Trash2
+																		size={16}
+																		strokeWidth={2}
+																		aria-hidden
+																	/>
+																</UnstyledButton>
+															</Group>
+														</figcaption>
+													</figure>
+												);
+											})}
+										</div>
+									) : null}
 
-								{nonViewable.length > 0 ? (
-									<ul className='task-attachments-list'>
-										{nonViewable.map(renderListItem)}
-									</ul>
-								) : null}
+									{nonViewable.length > 0 ? (
+										<ul className='task-attachments-list'>
+											{nonViewable.map(renderListItem)}
+										</ul>
+									) : null}
+								</>
+							)}
+						</div>
 
-								{attachments.length === 0 ? (
-									<Text size='sm' c='dimmed'>
-										No attachments yet
-									</Text>
-								) : null}
-							</>
-						)}
+						<div className='task-attachments-footer'>{uploadControls}</div>
 					</div>
-
-					<div className='task-attachments-footer'>{uploadControls}</div>
-				</div>
+				) : (
+					<>
+						{errorAlert}
+						<div className='task-attachments-footer'>{uploadControls}</div>
+					</>
+				)}
 
 				<AttachmentViewer
 					opened={viewerAttachment != null}

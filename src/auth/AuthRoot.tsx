@@ -16,6 +16,7 @@ import { acquireIdToken, needsInteractiveLogin } from './token';
 
 function EntraTokenBridge({ children }: { children: ReactNode }) {
 	const { instance, accounts, inProgress } = useMsal();
+	const redirectStarted = useRef(false);
 
 	useLayoutEffect(() => {
 		const account = instance.getActiveAccount() ?? accounts[0] ?? null;
@@ -31,6 +32,13 @@ function EntraTokenBridge({ children }: { children: ReactNode }) {
 				return await acquireIdToken(instance, active);
 			} catch (err) {
 				console.error('[auth] silent token acquire failed', err);
+				if (needsInteractiveLogin(err) && !redirectStarted.current) {
+					redirectStarted.current = true;
+					void instance.loginRedirect({
+						...loginRequest,
+						account: active,
+					});
+				}
 				return null;
 			}
 		});

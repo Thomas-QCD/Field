@@ -9,7 +9,9 @@ import {
 	Title,
 } from '@mantine/core';
 import { QrCode } from 'lucide-react';
+import { BrandLogo } from '../components/BrandLogo';
 import { useCurrentUser } from '../context/CurrentUserContext';
+import { useDocumentTitle } from '../documentTitle';
 import {
 	activateFromQrScan,
 	activateWithCode,
@@ -23,6 +25,7 @@ export function MobileLoginPage() {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const showScan = canScanActivationQr();
+	useDocumentTitle('Activate');
 
 	const finish = async (fn: () => Promise<unknown>) => {
 		setError(null);
@@ -49,7 +52,8 @@ export function MobileLoginPage() {
 			}}
 		>
 			<Stack gap='lg' maw={400} w='100%' align='stretch'>
-				<Stack gap={6}>
+				<Stack gap={6} align='flex-start'>
+					<BrandLogo size={72} />
 					<Title
 						order={1}
 						fz='2.75rem'

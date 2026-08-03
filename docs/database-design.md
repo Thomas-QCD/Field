@@ -236,7 +236,7 @@ any (via DELETE) → cancelled
 cancelled → Undetermined (restore within 7 days) | soft-deleted after 7 days
 ```
 
-Crew start/end timeline is `task_crew_events` (derives In Progress / Completed). Status history audit via a dedicated events table was dropped as unused; reintroduce later if needed.
+Crew start/end timeline is `task_crew_events` (derives In Progress / Completed). Explicit status transitions (admin PATCH, cancel/restore, crew-derived status changes) are logged in `task_history_events`. The task History UI aggregates these with attachments, documents, emails, and completion notes.
 
 ---
 
@@ -403,6 +403,26 @@ Append-only per-crew start/end check-in log (one `started` and one `ended` per u
 
 **Migration:** [`019_task_crew_events.sql`](../db/migrations/019_task_crew_events.sql)
 
+### `task_history_events`
+
+Append-only audit log for status transitions and restore events. The History UI also synthesizes timeline entries from `task_crew_events`, `task_attachments`, `task_documents`, `email_deliveries`, and `task_completion_notes`.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `bigint` | PK |
+| `task_id` | `bigint` | FK → `tasks.id`, NOT NULL |
+| `event_type` | `varchar(50)` | NOT NULL | `status_changed`, `restored`, … |
+| `actor_user_id` | `uuid` | FK → `users.id`, nullable |
+| `from_status` | `task_status` | nullable |
+| `to_status` | `task_status` | nullable |
+| `summary` | `text` | nullable | optional notes / reason |
+| `recorded_at` | `timestamptz` | NOT NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+**Index:** `(task_id, recorded_at DESC)`
+
+**Migration:** [`029_task_history_events.sql`](../db/migrations/029_task_history_events.sql)
+
 ---
 
 ## Flat → Relational Mapping
@@ -484,7 +504,7 @@ interface TaskReadModel {
 | `task_line_items` | Deferred — materials embedded in `TaskDesc` today |
 | `recipient_emails` | **Removed** — single `contacts.email` column |
 | `task_types` / `task_statuses` / `task_status_transitions` | **Removed** — enums on `tasks` are source of truth ([`027`](../db/migrations/027_drop_abandoned_lookup_tables.sql)) |
-| `task_status_events` | **Removed** — never wired; crew timeline is `task_crew_events` |
+| `task_status_events` | **Removed** — replaced by `task_history_events` for status/audit logging |
 | `task_failure_reasons` | Deferred — free-text `failed_reason` sufficient for MVP |
 | `user_roles` | Deferred — single `role` column on `users` until multi-role is required |
 
@@ -508,6 +528,7 @@ Minimum tables to support **create → assign → execute (status updates) → c
 | `task_documents` | Yes — PDF label, docket, POD |
 | `email_deliveries` | Yes — automatic email log |
 | `task_crew_events` | Yes — per-crew start/end logs; derives In Progress / Completed |
+| `task_history_events` | Yes — status change / restore audit for History UI |
 
 ---
 

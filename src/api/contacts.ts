@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, expectJsonField, expectOk } from './client';
 
 export interface Contact {
 	id: number;
@@ -10,14 +10,10 @@ export interface Contact {
 
 export async function listContacts(signal?: AbortSignal): Promise<Contact[]> {
 	const res = await apiFetch('/api/contacts', { signal });
-	const data = (await res.json().catch(() => ({}))) as {
-		contacts?: Contact[];
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `List contacts failed (${res.status})`);
-	}
+	const data = await expectOk<{ contacts?: Contact[] }>(
+		res,
+		'List contacts failed',
+	);
 	return data.contacts ?? [];
 }
 
@@ -26,18 +22,7 @@ export async function getContact(
 	signal?: AbortSignal,
 ): Promise<Contact> {
 	const res = await apiFetch(`/api/contacts/${id}`, { signal });
-	const data = (await res.json().catch(() => ({}))) as {
-		contact?: Contact;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Get contact failed (${res.status})`);
-	}
-	if (!data.contact) {
-		throw new Error('Get contact failed: empty response');
-	}
-	return data.contact;
+	return expectJsonField(res, 'contact', 'Get contact failed');
 }
 
 export async function searchContacts(
@@ -50,10 +35,10 @@ export async function searchContacts(
 	const res = await apiFetch(`/api/contacts?q=${encodeURIComponent(q)}`, {
 		signal,
 	});
-	if (!res.ok) {
-		throw new Error(`Contact search failed (${res.status})`);
-	}
-	const data = (await res.json()) as { contacts: Contact[] };
+	const data = await expectOk<{ contacts?: Contact[] }>(
+		res,
+		'Contact search failed',
+	);
 	return data.contacts ?? [];
 }
 
@@ -72,19 +57,7 @@ export async function createContact(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
-		contact?: Contact;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Create contact failed (${res.status})`);
-	}
-	if (!data.contact) {
-		throw new Error('Create contact failed: empty response');
-	}
-	return data.contact;
+	return expectJsonField(res, 'contact', 'Create contact failed');
 }
 
 export type UpdateContactInput = CreateContactInput;
@@ -98,25 +71,10 @@ export async function updateContact(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
-		contact?: Contact;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Update contact failed (${res.status})`);
-	}
-	if (!data.contact) {
-		throw new Error('Update contact failed: empty response');
-	}
-	return data.contact;
+	return expectJsonField(res, 'contact', 'Update contact failed');
 }
 
 export async function deleteContact(id: number): Promise<void> {
 	const res = await apiFetch(`/api/contacts/${id}`, { method: 'DELETE' });
-	if (!res.ok) {
-		const data = (await res.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Delete contact failed (${res.status})`);
-	}
+	await expectOk(res, 'Delete contact failed');
 }

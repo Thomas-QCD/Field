@@ -43,7 +43,7 @@ When scoping MVP, include at least one PDF type and one email trigger end-to-end
 | Development environment      | **Local app** + optional **RDS** (`field-dev`, us-west-1); other AWS services on request               |
 | Database (local / cloud-dev) | **PostgreSQL** — Docker/native local, or RDS `field-dev` (see `.env.example`)                          |
 | Database (production target) | **RDS PostgreSQL** — see [`docs/database-design.md`](docs/database-design.md)                          |
-| Backend / API                | **Not decided**                                                                                        |
+| Backend / API                | **Node.js** (`server/index.mjs`) — local + staging ECS Fargate                                         |
 | Auth                         | **Web:** Microsoft Entra ID SSO (MSAL) / local stub in dev. **Mobile:** QR activation + durable device session (remotely revocable). **No Cognito.** |
 | MVP scope                    | **Not defined** (task field subset TBD)                                                                |
 | Critical features            | **PDF generation**, **automatic email** — see [`docs/critical-features.md`](docs/critical-features.md) |
@@ -168,7 +168,7 @@ Design code for AWS compatibility, but run locally until integration is requeste
 
 ### Backend
 
-API layer is **not yet chosen**. Database is **relational (PostgreSQL)** — local Docker and/or RDS `field-dev`. Web auth: **local stub now**, Entra ID SSO when wired. See [Development environment](#development-environment).
+API is a **Node.js** HTTP server (`server/index.mjs`) with a Dockerfile for staging ECS. Database is **relational (PostgreSQL)** — local Docker and/or RDS `field-dev`. Web auth: local stub in development, Entra ID SSO (MSAL) when configured. See [Development environment](#development-environment).
 
 ## Guiding Principle: Minimum Viable Product First
 
@@ -223,7 +223,7 @@ There is an existing licensed FWM product that serves as the functional referenc
 ### This repo
 
 - **Project name:** Field
-- **Workspace directory:** `orders` (local folder name; product name is Field)
+- **Workspace directory:** `field`
 - **Contents:** Vite + React + TypeScript web app (Tasks shell); docs under `docs/`.
 - **Docs:** [`docs/sdd.md`](docs/sdd.md) (master design), `AGENTS.md`, `docs/task-model.md`, `docs/database-design.md`, `docs/critical-features.md`, [`docs/pdf-delivery-docket.md`](docs/pdf-delivery-docket.md), [`docs/staging.md`](docs/staging.md).
 - **Run locally:** `npm install && npm run dev` → http://localhost:5173 (API on `:3000`)
@@ -255,8 +255,8 @@ Master design in [`docs/sdd.md`](docs/sdd.md); proceed with MVP vertical slices.
 - Follow [`docs/sdd.md`](docs/sdd.md); implement MVP slices vertically.
 - Do not add dependencies, modules, or abstractions without clear MVP justification.
 - Build mobile-responsive web UI; Capacitor native projects are ready for local device/simulator testing.
-- **Web:** authenticated session (local auth in dev; Entra JWT in production) — auth not wired yet.
-- **Mobile:** deactivated until QR activation; durable device session; remote revoke supported in design (not implemented yet).
+- **Web:** local auth stub in development; Entra ID SSO (MSAL) when configured — JWT on API requests.
+- **Mobile:** QR activation → durable device session; admins can revoke devices remotely (API rejects revoked sessions; client returns to activation).
 - Do not unify auth across clients — web uses Entra/local JWT; mobile uses QR-issued device sessions. Cognito is not part of the stack.
 - RDS `field-dev`, S3 `field-dev-attachments`, and SES (`qcdlv.net`) exist in us-west-1; do not provision other AWS services without user approval.
 

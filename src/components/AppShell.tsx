@@ -20,6 +20,7 @@ import {
 import { useCurrentUser } from '../context/CurrentUserContext';
 import { useDeliveryMode } from '../deliveryMode';
 import { EntraSignedIn, showEntraSignedIn } from '../auth/EntraSignedIn';
+import { BrandLogo } from './BrandLogo';
 import { UserSelect } from './UserSelect';
 
 const navLinkStyles = {
@@ -102,17 +103,7 @@ export function FieldAppShell() {
 		>
 			<AppShell.Navbar p='md' visibleFrom='sm'>
 				<AppShell.Section mb='md'>
-					<Text
-						c='gray.1'
-						fw={700}
-						fz='xl'
-						style={{
-							fontFamily: 'var(--font-display)',
-							letterSpacing: '-0.02em',
-						}}
-					>
-						Field
-					</Text>
+					<BrandLogo size={40} />
 				</AppShell.Section>
 
 				<AppShell.Section grow>

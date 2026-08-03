@@ -12,10 +12,37 @@
 	width: min(1200px, calc(100vw - 2rem));
 }
 
+.task-detail-modal-header {
+	padding-bottom: 0.5rem;
+}
+
 .task-detail-modal-body {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
+}
+
+@media (min-width: 56em) {
+	.task-detail-modal {
+		/* Mantine ModalBase body/header padding */
+		--mb-padding: 1.75rem;
+		/*
+		 * Use the full available viewport height (same calc as KeyboardAwareModal
+		 * maxHeight) so short task property lists still leave room for attachments.
+		 */
+		height: calc(
+			100dvh -
+				max(
+					5dvh,
+					calc(var(--field-shell-header, 0px) + var(--field-modal-gap, 8px)),
+					env(safe-area-inset-top, 0px)
+				) -
+				max(
+					5dvh,
+					calc(var(--field-shell-footer, 0px) + var(--field-modal-gap, 8px))
+				)
+		);
+	}
 }
 
 .task-detail-scroll {
@@ -25,13 +52,34 @@
 	overflow-y: auto;
 	overscroll-behavior: contain;
 	padding-bottom: var(--mantine-spacing-md);
+	/* Keep the scrollbar clear of the attachments column */
+	padding-inline-end: 0.75rem;
+	scrollbar-gutter: stable;
+}
+
+@media (min-width: 56em) {
+	.task-detail-scroll {
+		display: flex;
+		flex-direction: column;
+		padding-inline-end: 1rem;
+	}
+
+	.task-detail-scroll-stack {
+		flex: 1 1 auto;
+		min-height: 100%;
+	}
+
+	.task-detail-layout {
+		flex: 1 1 auto;
+		min-height: 0;
+	}
 }
 
 .task-detail-footer {
 	flex-shrink: 0;
-	margin-inline: calc(-1 * var(--modal-padding, var(--mantine-spacing-md)));
+	margin-inline: calc(-1 * var(--mb-padding, var(--mantine-spacing-md)));
 	padding: var(--mantine-spacing-sm)
-		var(--modal-padding, var(--mantine-spacing-md)) var(--mantine-spacing-md);
+		var(--mb-padding, var(--mantine-spacing-md)) var(--mantine-spacing-md);
 	border-top: 1px solid var(--mantine-color-default-border);
 	background: var(--mantine-color-body);
 }
@@ -95,68 +143,36 @@
 }
 
 /*
- * height:0 + min-height:100% keeps this column from contributing to row
- * height (so previews don't stretch the modal). It then fills the left
- * column's height; only the preview list scrolls — Add attachment stays put.
+ * Attachments + history column: size to content (no forced fill / capped height).
  */
 .task-detail-attachments {
 	min-width: 0;
-	height: 0;
-	min-height: 100%;
-	max-height: calc(
-		100dvh -
-			max(
-				5dvh,
-				calc(var(--field-shell-header, 0px) + var(--field-modal-gap, 8px)),
-				env(safe-area-inset-top, 0px)
-			) -
-			max(
-				5dvh,
-				calc(var(--field-shell-footer, 0px) + var(--field-modal-gap, 8px))
-			) -
-			8rem
-	);
 	display: flex;
 	flex-direction: column;
-	overflow: hidden;
+	gap: 0.5rem;
+	align-self: start;
 }
 
 .task-detail-attachments-section {
-	flex: 1;
-	min-height: 0;
-}
-
-.task-detail-attachments-section > :last-child {
-	flex: 1;
-	min-height: 0;
+	min-width: 0;
 	display: flex;
 	flex-direction: column;
 }
 
-.task-detail-attachments .task-view-attachments {
-	flex: 1;
-	min-height: 0;
-	display: flex;
-	flex-direction: column;
+.task-detail-attachments .task-detail-attachments-section .task-view-attachments,
+.task-detail-attachments > .task-history {
 	margin-top: 0;
-	padding-top: 0;
-	border-top: none;
+	padding: 0.75rem 0.85rem;
 }
 
 .task-detail-attachments .task-attachments--preview {
-	flex: 1;
-	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	gap: 0.75rem;
 }
 
 .task-detail-attachments .task-attachments-scroll {
-	flex: 1;
-	min-height: 0;
-	overflow-x: hidden;
-	overflow-y: auto;
-	overscroll-behavior: contain;
+	overflow: visible;
 }
 
 .task-detail-attachments .task-attachments-footer {
@@ -180,12 +196,6 @@
 	.task-detail-layout {
 		grid-template-columns: 1fr;
 	}
-
-	.task-detail-attachments {
-		height: auto;
-		min-height: 0;
-		max-height: min(50vh, 24rem);
-	}
 }
 
 .tasks-grid-wrap {
@@ -197,8 +207,13 @@
 	overflow: hidden;
 	background: var(--color-surface-raised);
 	box-shadow: var(--shadow-card);
+}
 
-	/* Brand accent within AG Grid chrome (neutrals + purple only) */
+/*
+ * Quartz + [class*=ag-theme-] both set --ag-background-color: #fff at (0,1,0).
+ * Two classes here beats them so data/odd rows resolve off-white.
+ */
+.tasks-grid-wrap.ag-theme-quartz {
 	--ag-active-color: var(--color-accent);
 	--ag-selected-row-background-color: var(--color-accent-subtle);
 	--ag-row-hover-color: var(--color-accent-subtle);
@@ -207,11 +222,28 @@
 	--ag-checkbox-checked-color: var(--color-accent);
 	--ag-font-family: var(--font-sans);
 	--ag-border-color: var(--color-border);
-	--ag-header-background-color: #f0f0f0;
-	--ag-background-color: #ffffff;
-	--ag-odd-row-background-color: #fafafa;
+	--ag-background-color: var(--color-surface-raised);
+	--ag-data-background-color: var(--color-surface-raised);
+	--ag-odd-row-background-color: var(--color-surface);
+	--ag-header-background-color: var(--color-bg);
+	--ag-control-panel-background-color: var(--color-bg);
+	--ag-subheader-background-color: var(--color-surface);
+	--ag-panel-background-color: var(--color-surface-raised);
+	--ag-menu-background-color: var(--color-surface-raised);
+	--ag-tooltip-background-color: var(--color-surface-raised);
+	--ag-checkbox-background-color: var(--color-surface-raised);
 	--ag-foreground-color: var(--color-text);
 	--ag-secondary-foreground-color: var(--color-text-muted);
+}
+
+.tasks-grid-wrap .ag-grid-scrolling-rows,
+.tasks-grid-wrap .ag-grid-pinned-bottom-rows-container,
+.tasks-grid-wrap .ag-grid-pinned-top-rows-container {
+	background-color: var(--color-surface-raised);
+}
+
+.tasks-grid-wrap .ag-row-odd {
+	background-color: var(--color-surface);
 }
 
 .tasks-grid-wrap,
@@ -276,7 +308,7 @@
 	font-weight: 650;
 	letter-spacing: 0.02em;
 	line-height: 1.25;
-	color: #fff;
+	color: var(--color-text-on-dark);
 	white-space: nowrap;
 	vertical-align: middle;
 }
@@ -334,7 +366,7 @@
 	border-bottom: 2px solid transparent;
 	margin-bottom: -1px;
 	background: transparent;
-	color: var(--color-text-muted);
+	color: var(--color-text);
 	font-family: inherit;
 	font-size: 0.875rem;
 	font-weight: 600;
@@ -342,13 +374,22 @@
 	cursor: pointer;
 }
 
-.tasks-status-tab:hover {
-	color: var(--color-text);
+.tasks-status-tab:hover:not(:disabled) {
+	color: var(--color-accent);
 }
 
-.tasks-status-tab[data-selected] {
+.tasks-status-tab[data-selected]:not(:disabled) {
 	color: var(--color-accent);
 	border-bottom-color: var(--color-accent);
+}
+
+.tasks-status-tab:disabled {
+	color: var(--color-border);
+	font-weight: 500;
+	opacity: 1;
+	cursor: not-allowed;
+	border-bottom-color: transparent;
+	pointer-events: none;
 }
 
 .tasks-day-chips {
@@ -680,7 +721,7 @@
 	height: 2.5rem;
 	background: linear-gradient(
 		to bottom,
-		rgb(255 255 255 / 0),
+		rgb(250 250 250 / 0),
 		var(--color-surface-raised) 100%
 	);
 	pointer-events: none;
@@ -811,7 +852,7 @@
 	height: 3.5rem;
 	background: linear-gradient(
 		to bottom,
-		rgb(255 255 255 / 0),
+		rgb(250 250 250 / 0),
 		var(--color-surface-raised) 100%
 	);
 	pointer-events: none;
@@ -820,7 +861,7 @@
 .task-card--clipped:active .task-card-description-wrap::after {
 	background: linear-gradient(
 		to bottom,
-		rgb(255 255 255 / 0),
+		rgb(244 235 244 / 0),
 		var(--color-accent-subtle) 85%
 	);
 }
@@ -943,7 +984,7 @@
 	border: 0;
 	border-radius: 999px;
 	background: rgb(0 0 0 / 70%);
-	color: #fff;
+	color: var(--color-text-on-dark);
 	cursor: pointer;
 }
 
@@ -977,7 +1018,7 @@
 	min-height: 12rem;
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius);
-	background: #fff;
+	background: var(--color-surface-raised);
 	overflow: hidden;
 	touch-action: none;
 }
@@ -1041,6 +1082,91 @@
 	margin: 0.35rem 0 0;
 	font-size: 0.8rem;
 	color: var(--color-text-muted);
+}
+
+.task-started-live {
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+	width: 100%;
+	box-sizing: border-box;
+	padding: 0.85rem 1rem;
+	border: 1px solid color-mix(in srgb, var(--color-status-in-progress) 35%, var(--color-border));
+	border-left: 4px solid var(--color-status-in-progress);
+	border-radius: var(--radius);
+	background: color-mix(in srgb, var(--color-status-in-progress) 10%, var(--color-surface-raised));
+}
+
+.task-started-live-header {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.task-started-live-dot {
+	flex-shrink: 0;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 50%;
+	background: var(--color-status-in-progress);
+	box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-status-in-progress) 55%, transparent);
+	animation: task-started-live-pulse 1.8s ease-out infinite;
+}
+
+@keyframes task-started-live-pulse {
+	0% {
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-status-in-progress) 55%, transparent);
+	}
+	70% {
+		box-shadow: 0 0 0 0.45rem color-mix(in srgb, var(--color-status-in-progress) 0%, transparent);
+	}
+	100% {
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-status-in-progress) 0%, transparent);
+	}
+}
+
+.task-started-live-label {
+	margin: 0;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: color-mix(in srgb, var(--color-status-in-progress) 75%, var(--color-text));
+}
+
+.task-started-live-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+}
+
+.task-started-live-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.35rem;
+	font-size: 0.95rem;
+	line-height: 1.35;
+}
+
+.task-started-live-name {
+	font-weight: 600;
+	color: var(--color-text);
+}
+
+.task-started-live-elapsed {
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+	color: color-mix(in srgb, var(--color-status-in-progress) 70%, var(--color-text-muted));
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.task-started-live-dot {
+		animation: none;
+	}
 }
 
 .task-view-header {
@@ -1386,16 +1512,223 @@
 	font-size: 0.9rem;
 	line-height: 1.5;
 	color: var(--color-text);
-	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+}
+
+/* Rich task description (TipTap HTML) */
+.task-desc-html {
+	margin: 0;
+	font-size: inherit;
+	line-height: 1.5;
+	color: inherit;
+	overflow-wrap: anywhere;
+}
+
+.task-desc-html p {
+	margin: 0 0 0.5em;
+}
+
+.task-desc-html p:last-child {
+	margin-bottom: 0;
+}
+
+.task-desc-html h1,
+.task-desc-html h2,
+.task-desc-html h3 {
+	margin: 0.4em 0 0.35em;
+	font-family: var(--font-heading, inherit);
+	font-weight: 700;
+	line-height: 1.25;
+}
+
+.task-desc-html h1 {
+	font-size: 1.35em;
+}
+
+.task-desc-html h2 {
+	font-size: 1.2em;
+}
+
+.task-desc-html h3 {
+	font-size: 1.08em;
+}
+
+.task-desc-html ul,
+.task-desc-html ol {
+	margin: 0.35em 0 0.5em;
+	padding-left: 1.35em;
+}
+
+.task-desc-html li {
+	margin: 0.15em 0;
+}
+
+.task-desc-html li p {
+	margin: 0;
+}
+
+.task-desc-editor .mantine-RichTextEditor-root {
+	border: 1px solid var(--mantine-color-default-border);
+	border-radius: var(--mantine-radius-md);
+}
+
+.task-desc-editor .tiptap p.is-editor-empty:first-child::before {
+	color: var(--mantine-color-placeholder);
+	content: attr(data-placeholder);
+	float: left;
+	height: 0;
+	pointer-events: none;
 }
 
 .task-view-attachments {
 	margin-top: 0.5rem;
-	padding-top: 0.85rem;
-	border-top: 1px solid var(--color-border);
+	padding: 0.75rem 0.85rem;
+	border-radius: var(--radius);
+	background: var(--color-surface);
 	width: 100%;
 	min-width: 0;
+	box-sizing: border-box;
+}
+
+.task-attachments-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	width: 100%;
+	margin: 0 0 0.75rem;
+	padding: 0.15rem 0;
+	border: none;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	text-align: left;
+}
+
+.task-attachments-toggle:focus-visible {
+	outline: 2px solid
+		var(--mantine-color-brand-filled, var(--color-accent, #228be6));
+	outline-offset: 2px;
+	border-radius: 2px;
+}
+
+.task-attachments-toggle-label {
+	font-size: 0.8rem;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+
+.task-attachments-toggle-icon {
+	flex-shrink: 0;
+	color: var(--color-text-muted, var(--mantine-color-dimmed));
+	transition: transform 0.15s ease;
+}
+
+.task-attachments-toggle-icon--collapsed {
+	transform: rotate(-90deg);
+}
+
+.task-view-attachments--collapsed .task-attachments-toggle {
+	margin-bottom: 0;
+}
+
+.task-attachments-toggle:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.task-view-attachments--collapsed .task-attachments-footer {
+	margin-top: 0.65rem;
+}
+
+.task-detail-attachments .task-attachments-toggle {
+	margin-bottom: 0.65rem;
+	padding-bottom: 0.35rem;
+	border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.task-view-attachments--collapsed .task-attachments-toggle:disabled {
+	margin-bottom: 0;
+	padding-bottom: 0;
+	border-bottom: none;
+}
+
+.task-detail-attachments
+	.task-view-attachments--collapsed
+	.task-attachments-toggle:disabled {
+	margin-bottom: 0;
+	padding-bottom: 0;
+	border-bottom: none;
+}
+
+/* —— Task history timeline (shell reuses .task-view-attachments) —— */
+
+.task-history-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.task-history-item {
+	display: grid;
+	grid-template-columns: 0.75rem 1fr;
+	gap: 0.65rem;
+	align-items: start;
+	position: relative;
+	padding: 0.55rem 0;
+}
+
+.task-history-item:not(:last-child)::before {
+	content: '';
+	position: absolute;
+	left: 0.3rem;
+	top: 1.15rem;
+	bottom: 0;
+	width: 1px;
+	background: var(--mantine-color-default-border, #dee2e6);
+}
+
+.task-history-item-marker {
+	width: 0.55rem;
+	height: 0.55rem;
+	margin-top: 0.35rem;
+	border-radius: 50%;
+	background: var(--mantine-color-brand-filled, var(--color-accent, #228be6));
+	box-shadow: 0 0 0 3px
+		color-mix(
+			in srgb,
+			var(--mantine-color-brand-filled, var(--color-accent, #228be6)) 18%,
+			transparent
+		);
+}
+
+.task-history-item-content {
+	min-width: 0;
+}
+
+.task-history-item-title {
+	margin: 0;
+	font-size: 0.9rem;
+	font-weight: 600;
+	line-height: 1.35;
+}
+
+.task-history-item-detail {
+	margin: 0.2rem 0 0;
+	font-size: 0.85rem;
+	line-height: 1.4;
+	color: var(--color-text-muted, var(--mantine-color-dimmed));
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.task-history-item-when {
+	margin: 0.25rem 0 0;
+	font-size: 0.75rem;
+	color: var(--color-text-muted, var(--mantine-color-dimmed));
 }
 
 .task-attachments--preview {
@@ -1486,7 +1819,7 @@
 	display: block;
 	max-width: 100%;
 	height: auto;
-	background: #fff;
+	background: var(--color-surface-raised);
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
@@ -1584,7 +1917,7 @@
 	display: flex;
 	flex-direction: column;
 	background: #0b0b0b;
-	color: #f5f5f5;
+	color: var(--color-text-on-dark);
 	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -1616,12 +1949,12 @@
 	width: 2.5rem;
 	height: 2.5rem;
 	border-radius: 999px;
-	color: #f5f5f5;
+	color: var(--color-text-on-dark);
 	flex-shrink: 0;
 }
 
 .attachment-viewer-close:hover {
-	background: rgba(255, 255, 255, 0.12);
+	background: rgba(240, 240, 240, 0.12);
 }
 
 .attachment-viewer-stage {
@@ -1665,7 +1998,7 @@
 	max-width: 28rem;
 	padding: 1.25rem;
 	text-align: center;
-	color: rgba(255, 255, 255, 0.85);
+	color: rgba(240, 240, 240, 0.85);
 	font-size: 0.95rem;
 	line-height: 1.45;
 }
@@ -1680,7 +2013,7 @@
 	justify-content: center;
 	padding: 0.55rem 1rem;
 	border-radius: var(--radius, 0.5rem);
-	background: #fff;
+	background: var(--color-surface-raised);
 	color: #111;
 	font-weight: 600;
 	text-decoration: none;
@@ -1714,7 +2047,7 @@
 }
 
 .attachment-viewer-pdf .pdf-preview-status {
-	color: rgba(255, 255, 255, 0.7);
+	color: rgba(240, 240, 240, 0.7);
 }
 
 .attachment-viewer-pdf .pdf-preview-status--error {
@@ -1728,7 +2061,7 @@
 	padding: 0.45rem 0.75rem 0.65rem;
 	text-align: center;
 	font-size: 0.75rem;
-	color: rgba(255, 255, 255, 0.55);
+	color: rgba(240, 240, 240, 0.55);
 }
 
 .task-attachments-input {
@@ -1760,7 +2093,7 @@
 	padding: 0.55rem 0.65rem;
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius);
-	background: var(--color-surface-raised, #fff);
+	background: var(--color-surface-raised);
 	min-width: 0;
 }
 
@@ -1813,7 +2146,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	display: flex;
 	flex-direction: column;
 	background: #000;
-	color: #f5f5f5;
+	color: var(--color-text-on-dark);
 	touch-action: none;
 }
 
@@ -1841,7 +2174,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 .multi-shot-camera-flash {
 	position: absolute;
 	z-index: 1;
-	background: #fff;
+	background: var(--color-surface-raised);
 	opacity: 0.55;
 	pointer-events: none;
 }
@@ -1861,7 +2194,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	text-align: center;
 	font-size: 0.8rem;
 	font-weight: 600;
-	color: rgb(255 255 255 / 85%);
+	color: rgb(240 240 240 / 85%);
 }
 
 .multi-shot-camera-text-btn {
@@ -1874,7 +2207,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	border: 0;
 	border-radius: var(--radius);
 	background: transparent;
-	color: #fff;
+	color: var(--color-text-on-dark);
 	font-family: inherit;
 	font-size: 0.95rem;
 	font-weight: 600;
@@ -1911,7 +2244,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	font-size: 0.85rem;
 	line-height: 1.35;
 	text-align: center;
-	color: rgb(255 255 255 / 90%);
+	color: rgb(240 240 240 / 90%);
 }
 
 .multi-shot-camera-fallback {
@@ -1920,7 +2253,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	padding: 0;
 	border: 0;
 	background: none;
-	color: #fff;
+	color: var(--color-text-on-dark);
 	font: inherit;
 	font-weight: 700;
 	text-decoration: underline;
@@ -1949,7 +2282,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	height: 3.5rem;
 	border-radius: 0.35rem;
 	overflow: hidden;
-	border: 2px solid rgb(255 255 255 / 85%);
+	border: 2px solid rgb(240 240 240 / 85%);
 	background: #222;
 }
 
@@ -1976,7 +2309,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	border: 0;
 	border-radius: 999px;
 	background: rgb(0 0 0 / 70%);
-	color: #fff;
+	color: var(--color-text-on-dark);
 	cursor: pointer;
 }
 
@@ -2002,10 +2335,10 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	min-width: 3.5rem;
 	min-height: 2.5rem;
 	padding: 0.35rem 0.55rem;
-	border: 1px solid rgb(255 255 255 / 45%);
+	border: 1px solid rgb(240 240 240 / 45%);
 	border-radius: var(--radius);
 	background: rgb(0 0 0 / 35%);
-	color: #fff;
+	color: var(--color-text-on-dark);
 	font-family: inherit;
 	font-size: 0.85rem;
 	font-weight: 700;
@@ -2021,7 +2354,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	flex-direction: column;
 	min-width: 5.5rem;
 	overflow: hidden;
-	border: 1px solid rgb(255 255 255 / 35%);
+	border: 1px solid rgb(240 240 240 / 35%);
 	border-radius: var(--radius);
 	background: rgb(20 20 20 / 92%);
 	box-shadow: 0 8px 20px rgb(0 0 0 / 35%);
@@ -2034,9 +2367,9 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	min-height: 2.5rem;
 	padding: 0.45rem 0.75rem;
 	border: 0;
-	border-bottom: 1px solid rgb(255 255 255 / 12%);
+	border-bottom: 1px solid rgb(240 240 240 / 12%);
 	background: transparent;
-	color: #fff;
+	color: var(--color-text-on-dark);
 	font-family: inherit;
 	font-size: 0.9rem;
 	font-weight: 600;
@@ -2050,7 +2383,7 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 
 .multi-shot-camera-aspect-option:active,
 .multi-shot-camera-aspect-option--active {
-	background: rgb(255 255 255 / 12%);
+	background: rgb(240 240 240 / 12%);
 }
 
 .multi-shot-camera-footer-spacer {
@@ -2063,8 +2396,8 @@ html.multi-shot-camera-active #root.multi-shot-camera-active {
 	width: 4.25rem;
 	height: 4.25rem;
 	border-radius: 999px;
-	border: 4px solid #fff;
-	background: rgb(255 255 255 / 92%);
+	border: 4px solid var(--color-text-on-dark);
+	background: rgb(250 250 250 / 92%);
 	box-shadow: 0 0 0 3px rgb(0 0 0 / 35%);
 	cursor: pointer;
 }

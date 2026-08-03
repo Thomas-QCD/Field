@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, expectJsonField, expectOk } from './client';
 
 export interface Address {
 	id: number;
@@ -10,14 +10,10 @@ export interface Address {
 
 export async function listAddresses(signal?: AbortSignal): Promise<Address[]> {
 	const res = await apiFetch('/api/addresses', { signal });
-	const data = (await res.json().catch(() => ({}))) as {
-		addresses?: Address[];
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `List addresses failed (${res.status})`);
-	}
+	const data = await expectOk<{ addresses?: Address[] }>(
+		res,
+		'List addresses failed',
+	);
 	return data.addresses ?? [];
 }
 
@@ -26,18 +22,7 @@ export async function getAddress(
 	signal?: AbortSignal,
 ): Promise<Address> {
 	const res = await apiFetch(`/api/addresses/${id}`, { signal });
-	const data = (await res.json().catch(() => ({}))) as {
-		address?: Address;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Get address failed (${res.status})`);
-	}
-	if (!data.address) {
-		throw new Error('Get address failed: empty response');
-	}
-	return data.address;
+	return expectJsonField(res, 'address', 'Get address failed');
 }
 
 export interface CreateAddressInput {
@@ -55,19 +40,7 @@ export async function createAddress(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
-		address?: Address;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Create address failed (${res.status})`);
-	}
-	if (!data.address) {
-		throw new Error('Create address failed: empty response');
-	}
-	return data.address;
+	return expectJsonField(res, 'address', 'Create address failed');
 }
 
 export type UpdateAddressInput = CreateAddressInput;
@@ -81,25 +54,10 @@ export async function updateAddress(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
-		address?: Address;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Update address failed (${res.status})`);
-	}
-	if (!data.address) {
-		throw new Error('Update address failed: empty response');
-	}
-	return data.address;
+	return expectJsonField(res, 'address', 'Update address failed');
 }
 
 export async function deleteAddress(id: number): Promise<void> {
 	const res = await apiFetch(`/api/addresses/${id}`, { method: 'DELETE' });
-	if (!res.ok) {
-		const data = (await res.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Delete address failed (${res.status})`);
-	}
+	await expectOk(res, 'Delete address failed');
 }

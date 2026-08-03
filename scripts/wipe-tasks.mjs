@@ -12,19 +12,11 @@
  * --purge-s3  Also delete S3 objects referenced by task_attachments /
  *             task_documents (best-effort; missing keys are ignored).
  */
-import { execFileSync } from "node:child_process";
 import {
   DeleteObjectsCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import pg from "pg";
-
-const SECRET_ARN =
-  "arn:aws:secretsmanager:us-west-1:730335210534:secret:rds!db-01f1889d-8922-4311-88c5-3c3f4ffb540b-7lxFSw";
-const HOST = "field-dev.c9saiusmgamc.us-west-1.rds.amazonaws.com";
-const PORT = 5432;
-const DATABASE = "field";
-const USER = "field_admin";
+import { createPgClient } from "./lib/db.mjs";
 
 const REGION = process.env.AWS_REGION || "us-west-1";
 const BUCKET = process.env.S3_BUCKET || "field-dev-attachments";
@@ -33,38 +25,8 @@ const dryRun = process.argv.includes("--dry-run");
 const confirm = process.argv.includes("--confirm");
 const purgeS3 = process.argv.includes("--purge-s3");
 
-function getPassword() {
-  if (process.env.DATABASE_URL) {
-    return decodeURIComponent(new URL(process.env.DATABASE_URL).password);
-  }
-  if (process.env.PGPASSWORD) return process.env.PGPASSWORD;
-
-  const raw = execFileSync(
-    "aws",
-    [
-      "secretsmanager",
-      "get-secret-value",
-      "--region",
-      "us-west-1",
-      "--secret-id",
-      SECRET_ARN,
-      "--query",
-      "SecretString",
-      "--output",
-      "text",
-    ],
-    { encoding: "utf8" },
-  ).trim();
-
-  const parsed = JSON.parse(raw);
-  if (!parsed.password) {
-    throw new Error("Secrets Manager payload missing password");
-  }
-  return parsed.password;
-}
-
 /**
- * @param {pg.Client} client
+ * @param {import("pg").Client} client
  */
 async function countRelated(client) {
   const tables = [
@@ -73,6 +35,7 @@ async function countRelated(client) {
     "task_documents",
     "email_deliveries",
     "task_crew_events",
+    "task_history_events",
     "task_crew_members",
     "task_contacts",
     "task_completion_notes",
@@ -134,14 +97,7 @@ async function main() {
     return;
   }
 
-  const client = new pg.Client({
-    host: HOST,
-    port: PORT,
-    database: DATABASE,
-    user: USER,
-    password: getPassword(),
-    ssl: { rejectUnauthorized: false },
-  });
+  const client = createPgClient();
   await client.connect();
 
   try {
@@ -183,6 +139,7 @@ async function main() {
     await client.query(`DELETE FROM task_documents`);
     await client.query(`DELETE FROM email_deliveries`);
     await client.query(`DELETE FROM task_crew_events`);
+    await client.query(`DELETE FROM task_history_events`);
     // CASCADE: task_crew_members, task_contacts, task_completion_notes
     await client.query(`DELETE FROM tasks`);
 

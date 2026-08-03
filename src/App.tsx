@@ -6,6 +6,7 @@ import { MobileAuthGate } from './auth/MobileAuthGate';
 import { FieldAppShell } from './components/AppShell';
 import { CurrentUserProvider, useCurrentUser } from './context/CurrentUserContext';
 import { AG_GRID_MOBILE_MQ } from './agGridDefaults';
+import { DocumentTitle } from './documentTitle';
 import { useDeliveryMode } from './deliveryMode';
 import { NotificationTapListener } from './notifications/NotificationTapListener';
 import { AddressesPage } from './pages/AddressesPage';
@@ -51,6 +52,7 @@ function DeliveryRoute() {
 export default function App() {
 	return (
 		<BrowserRouter>
+			<DocumentTitle />
 			<NotificationTapListener />
 			<AuthRoot>
 				<CurrentUserProvider>

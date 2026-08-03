@@ -77,7 +77,7 @@ export const SignaturePad = forwardRef<
 			if (!canvas || !ctx) return;
 			ctx.save();
 			ctx.setTransform(1, 0, 0, 1, 0, 0);
-			ctx.fillStyle = '#fff';
+			ctx.fillStyle = '#fafafa';
 			ctx.fillRect(0, 0, canvas.width, canvas.height);
 			ctx.restore();
 			const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -122,7 +122,7 @@ export const SignaturePad = forwardRef<
 			ctx.lineJoin = 'round';
 			ctx.strokeStyle = '#111';
 			ctx.lineWidth = 2.5;
-			ctx.fillStyle = '#fff';
+			ctx.fillStyle = '#fafafa';
 			ctx.fillRect(0, 0, cssW, cssH);
 
 			if (snapshot) {

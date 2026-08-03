@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, expectOk } from './client';
 
 export type CrewLocationEventType = 'started' | 'ended';
 
@@ -18,9 +18,9 @@ export async function listCrewLocations(
 	signal?: AbortSignal,
 ): Promise<CrewLocation[]> {
 	const res = await apiFetch('/api/crew-locations', { signal });
-	if (!res.ok) {
-		throw new Error(`Crew locations failed (${res.status})`);
-	}
-	const data = (await res.json()) as { locations: CrewLocation[] };
+	const data = await expectOk<{ locations?: CrewLocation[] }>(
+		res,
+		'Crew locations failed',
+	);
 	return data.locations ?? [];
 }

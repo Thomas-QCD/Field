@@ -25,7 +25,6 @@ import {
 } from '../api/tasks';
 import { uploadAttachment } from '../api/attachments';
 import { useCurrentUser } from '../context/CurrentUserContext';
-import { formatShortName } from '../formatName';
 import type { Task, TaskDetail, TaskStatus } from '../types/task';
 import {
 	NewTaskModal,
@@ -372,6 +371,18 @@ export function TasksPage({
 		return counts;
 	}, [scopedTasks, visibleStatusTabs]);
 
+	/** Leave empty tabs: pick the first tab that still has tasks. */
+	useEffect(() => {
+		if (!showStatusTabs) return;
+		if ((statusTabCounts[statusTab] ?? 0) > 0) return;
+		const fallback = visibleStatusTabs.find(
+			(tab) => (statusTabCounts[tab.value] ?? 0) > 0,
+		);
+		if (fallback && fallback.value !== statusTab) {
+			setStatusTab(fallback.value);
+		}
+	}, [showStatusTabs, statusTab, statusTabCounts, visibleStatusTabs]);
+
 	const visibleTasks = useMemo(() => {
 		let next = scopedTasks;
 		if (showStatusTabs) {
@@ -499,10 +510,10 @@ export function TasksPage({
 	const editorInitialContactOptions = useMemo(() => {
 		if (!editingTask) return null;
 		return editingTask.contacts.map((c) => {
-			const shortName = formatShortName(c.name);
+			const name = c.name.trim();
 			return {
 				value: String(c.id),
-				label: c.email ? `${shortName} (${c.email})` : shortName,
+				label: c.email ? `${name} (${c.email})` : name,
 			};
 		});
 	}, [editingTask]);
@@ -578,16 +589,21 @@ export function TasksPage({
 				>
 					{visibleStatusTabs.map((tab) => {
 						const selected = tab.value === statusTab;
-						const count = statusTabCounts[tab.value];
+						const count = statusTabCounts[tab.value] ?? 0;
+						const empty = count === 0;
 						return (
 							<button
 								key={tab.value}
 								type='button'
 								role='tab'
 								aria-selected={selected}
+								aria-disabled={empty || undefined}
 								className='tasks-status-tab'
 								data-selected={selected || undefined}
-								onClick={() => setStatusTab(tab.value)}
+								disabled={empty}
+								onClick={() => {
+									if (!empty) setStatusTab(tab.value);
+								}}
 							>
 								{tab.label} ({count})
 							</button>

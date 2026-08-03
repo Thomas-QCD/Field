@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import { formatShortDateTimeWithAgo } from '../formatTime';
+import { htmlToPlainText, isEmptyTaskDesc } from '../taskDescHtml';
 import { TaskStatusBadge } from './TaskStatusBadge';
 
 function formatFullAddress(task: Task): string {
@@ -82,12 +83,14 @@ function DeliveryTaskCard({
 					</div>
 				</div>
 
-				{task.description ? (
+				{!isEmptyTaskDesc(task.description) ? (
 					<div
 						ref={descriptionRef}
 						className='delivery-card-description-wrap'
 					>
-						<p className='delivery-card-description'>{task.description}</p>
+						<p className='delivery-card-description'>
+							{htmlToPlainText(task.description)}
+						</p>
 					</div>
 				) : null}
 			</button>

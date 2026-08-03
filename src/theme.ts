@@ -24,5 +24,5 @@ export const theme = createTheme({
   },
   defaultRadius: 'md',
   black: '#141414',
-  white: '#ffffff',
+  white: '#fafafa',
 });

@@ -5,7 +5,7 @@ import type {
 	TaskStatus,
 	TaskType,
 } from '../types/task';
-import { apiFetch } from './client';
+import { apiFetch, expectJsonField, expectOk, readJson } from './client';
 
 export async function listTasks(
 	signal?: AbortSignal,
@@ -15,14 +15,7 @@ export async function listTasks(
 	if (opts?.crewMemberId) params.set('crewMemberId', opts.crewMemberId);
 	const qs = params.toString();
 	const res = await apiFetch(`/api/tasks${qs ? `?${qs}` : ''}`, { signal });
-	const data = (await res.json().catch(() => ({}))) as {
-		tasks?: Task[];
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `List tasks failed (${res.status})`);
-	}
+	const data = await expectOk<{ tasks?: Task[] }>(res, 'List tasks failed');
 	return data.tasks ?? [];
 }
 
@@ -31,18 +24,45 @@ export async function getTask(
 	signal?: AbortSignal,
 ): Promise<TaskDetail> {
 	const res = await apiFetch(`/api/tasks/${id}`, { signal });
-	const data = (await res.json().catch(() => ({}))) as {
-		task?: TaskDetail;
-		error?: string;
-	};
+	return expectJsonField(res, 'task', 'Get task failed');
+}
 
-	if (!res.ok) {
-		throw new Error(data.error ?? `Get task failed (${res.status})`);
-	}
-	if (!data.task) {
-		throw new Error('Get task failed: empty response');
-	}
-	return data.task;
+export type TaskHistoryEventType =
+	| 'created'
+	| 'status_changed'
+	| 'crew_started'
+	| 'crew_ended'
+	| 'cancelled'
+	| 'restored'
+	| 'attachment_added'
+	| 'document_generated'
+	| 'email_sent'
+	| 'note_added';
+
+export interface TaskHistoryEvent {
+	id: string;
+	type: TaskHistoryEventType | string;
+	at: string | null;
+	actorName: string | null;
+	fromStatus: string | null;
+	toStatus: string | null;
+	summary: string | null;
+	detail: string | null;
+	latitude: number | null;
+	longitude: number | null;
+	accuracyMeters: number | null;
+}
+
+export async function getTaskHistory(
+	taskId: number,
+	signal?: AbortSignal,
+): Promise<TaskHistoryEvent[]> {
+	const res = await apiFetch(`/api/tasks/${taskId}/history`, { signal });
+	const data = await expectOk<{ events?: TaskHistoryEvent[] }>(
+		res,
+		'Get task history failed',
+	);
+	return data.events ?? [];
 }
 
 export interface CreateTaskInput {
@@ -82,19 +102,7 @@ export async function createTask(input: CreateTaskInput): Promise<CreatedTask> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
-		task?: CreatedTask;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Create task failed (${res.status})`);
-	}
-	if (!data.task) {
-		throw new Error('Create task failed: empty response');
-	}
-	return data.task;
+	return expectJsonField(res, 'task', 'Create task failed');
 }
 
 export type UpdateTaskInput = Omit<CreateTaskInput, 'createdByUserId'>;
@@ -108,19 +116,7 @@ export async function updateTask(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
-		task?: CreatedTask;
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Update task failed (${res.status})`);
-	}
-	if (!data.task) {
-		throw new Error('Update task failed: empty response');
-	}
-	return data.task;
+	return expectJsonField(res, 'task', 'Update task failed');
 }
 
 export async function updateTaskStatus(
@@ -145,34 +141,23 @@ export async function updateTaskStatus(
 			...(opts?.userId ? { userId: opts.userId } : {}),
 		}),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
-		task?: {
-			id: number;
-			status: TaskStatus;
-			completedAt?: string | null;
-			completedNotes?: string | null;
-			failedReason?: string | null;
-			completionNotes?: TaskCompletionNote[];
-			completionNotesByName?: string | null;
-		};
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Update status failed (${res.status})`);
-	}
-	if (!data.task) {
-		throw new Error('Update status failed: empty response');
-	}
+	const data = await expectJsonField<{
+		id: number;
+		status: TaskStatus;
+		completedAt?: string | null;
+		completedNotes?: string | null;
+		failedReason?: string | null;
+		completionNotes?: TaskCompletionNote[];
+		completionNotesByName?: string | null;
+	}>(res, 'task', 'Update status failed');
 	return {
-		id: data.task.id,
-		status: data.task.status,
-		completedAt: data.task.completedAt ?? null,
-		completedNotes: data.task.completedNotes ?? null,
-		failedReason: data.task.failedReason ?? null,
-		completionNotes: data.task.completionNotes ?? [],
-		completionNotesByName: data.task.completionNotesByName ?? null,
+		id: data.id,
+		status: data.status,
+		completedAt: data.completedAt ?? null,
+		completedNotes: data.completedNotes ?? null,
+		failedReason: data.failedReason ?? null,
+		completionNotes: data.completionNotes ?? [],
+		completionNotesByName: data.completionNotesByName ?? null,
 	};
 }
 
@@ -184,8 +169,8 @@ export interface CreateCrewEventInput {
 	eventType: CrewEventType;
 	outcome?: CrewEventOutcome;
 	notes?: string;
-	latitude?: number | null;
-	longitude?: number | null;
+	latitude: number;
+	longitude: number;
 	accuracyMeters?: number | null;
 	recordedAt?: string;
 }
@@ -221,8 +206,7 @@ export async function createCrewEvent(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input),
 	});
-
-	const data = (await res.json().catch(() => ({}))) as {
+	const data = await expectOk<{
 		event?: CrewEvent;
 		task?: {
 			id: number;
@@ -232,12 +216,7 @@ export async function createCrewEvent(
 			failedReason?: string | null;
 			completionNotes?: TaskCompletionNote[];
 		};
-		error?: string;
-	};
-
-	if (!res.ok) {
-		throw new Error(data.error ?? `Crew event failed (${res.status})`);
-	}
+	}>(res, 'Crew event failed');
 	if (!data.event || !data.task) {
 		throw new Error('Crew event failed: empty response');
 	}
@@ -256,27 +235,14 @@ export async function createCrewEvent(
 
 export async function deleteTask(id: number): Promise<void> {
 	const res = await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
-	if (!res.ok) {
-		const data = (await res.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Cancel task failed (${res.status})`);
-	}
+	await expectOk(res, 'Cancel task failed');
 }
 
 export async function restoreTask(
 	id: number,
 ): Promise<{ id: number; status: TaskStatus }> {
 	const res = await apiFetch(`/api/tasks/${id}/restore`, { method: 'POST' });
-	const data = (await res.json().catch(() => ({}))) as {
-		error?: string;
-		task?: { id: number; status: TaskStatus };
-	};
-	if (!res.ok) {
-		throw new Error(data.error ?? `Restore task failed (${res.status})`);
-	}
-	if (!data.task) {
-		throw new Error('Restore task failed: empty response');
-	}
-	return data.task;
+	return expectJsonField(res, 'task', 'Restore task failed');
 }
 
 /** Fetch delivery docket PDF and open it in a new tab for viewing/printing (no download). */
@@ -286,7 +252,7 @@ export async function openDeliveryDocket(taskId: number): Promise<void> {
 	try {
 		const res = await apiFetch(`/api/tasks/${taskId}/delivery-docket`);
 		if (!res.ok) {
-			const data = (await res.json().catch(() => ({}))) as { error?: string };
+			const data = await readJson<{ error?: string }>(res);
 			throw new Error(data.error ?? `Delivery docket failed (${res.status})`);
 		}
 		const buf = await res.arrayBuffer();
@@ -305,5 +271,3 @@ export async function openDeliveryDocket(taskId: number): Promise<void> {
 		throw err;
 	}
 }
-
-

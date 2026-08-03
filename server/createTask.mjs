@@ -1,4 +1,10 @@
 import { getPool } from "./db.mjs";
+import { recordTaskHistoryEvent } from "./taskHistory.mjs";
+import {
+  DELIVERY_STATUS_TRANSITIONS,
+  STATUS_TRANSITIONS,
+  statusTransitionsFor,
+} from "../shared/statusTransitions.js";
 
 const TASK_TYPES = new Set([
   "Delivery",
@@ -696,41 +702,6 @@ export async function updateTask(taskId, body) {
   }
 }
 
-/** @type {Record<string, string[]>} */
-const STATUS_TRANSITIONS = {
-  Unassigned: ["Assigned"],
-  Assigned: ["Loaded", "In Progress", "Failed"],
-  Loaded: ["In Progress", "Failed"],
-  "In Progress": ["Completed", "Failed", "Undetermined"],
-  Completed: ["In Progress"],
-  Failed: [],
-  Undetermined: [],
-  Cancelled: [],
-};
-
-/** Delivery: Loaded is the active-work status (same role as In Progress). */
-/** @type {Record<string, string[]>} */
-const DELIVERY_STATUS_TRANSITIONS = {
-  Unassigned: ["Assigned"],
-  Assigned: ["Loaded", "Failed"],
-  Loaded: ["Completed", "Failed", "Undetermined"],
-  "In Progress": ["Completed", "Failed", "Undetermined"],
-  Completed: ["Loaded"],
-  Failed: [],
-  Undetermined: [],
-  Cancelled: [],
-};
-
-/**
- * @param {string | undefined} taskType
- * @returns {Record<string, string[]>}
- */
-function statusTransitionsFor(taskType) {
-  return taskType === "Delivery"
-    ? DELIVERY_STATUS_TRANSITIONS
-    : STATUS_TRANSITIONS;
-}
-
 const TERMINAL_STATUSES = new Set([
   "Completed",
   "Failed",
@@ -806,9 +777,17 @@ export async function createCrewEvent(taskId, body) {
     );
   }
 
+  if (latitude == null || longitude == null) {
+    throw Object.assign(
+      new Error("latitude and longitude are required"),
+      { status: 400 },
+    );
+  }
   if (
-    (latitude != null && (latitude < -90 || latitude > 90)) ||
-    (longitude != null && (longitude < -180 || longitude > 180))
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
   ) {
     throw Object.assign(new Error("Invalid latitude/longitude"), {
       status: 400,
@@ -1063,6 +1042,18 @@ export async function createCrewEvent(taskId, body) {
       }
     }
 
+    if (nextStatus !== fromStatus) {
+      await recordTaskHistoryEvent(client, {
+        taskId,
+        eventType: "status_changed",
+        actorUserId: userId,
+        fromStatus,
+        toStatus: nextStatus,
+        summary: `Status changed via crew ${eventType}`,
+        recordedAt,
+      });
+    }
+
     await client.query("COMMIT");
 
     const completionNotes = await listCompletionNotes(getPool(), taskId);
@@ -1274,6 +1265,15 @@ export async function updateTaskStatus(taskId, body) {
         [taskId, status],
       ));
     }
+
+    await recordTaskHistoryEvent(client, {
+      taskId,
+      eventType: "status_changed",
+      actorUserId: authorUserId,
+      fromStatus,
+      toStatus: status,
+      summary: notesValue,
+    });
 
     await client.query("COMMIT");
 

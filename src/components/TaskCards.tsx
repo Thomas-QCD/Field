@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import { formatShortName, formatShortNameList } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
+import { htmlToPlainText, isEmptyTaskDesc } from '../taskDescHtml';
 import { TaskStatusBadge } from './TaskStatusBadge';
 
 function formatWindow(start: string | null, end: string | null): string {
@@ -85,12 +86,14 @@ function TaskCard({
 					/>
 				</div>
 
-				{task.description ? (
+				{!isEmptyTaskDesc(task.description) ? (
 					<div
 						ref={descriptionRef}
 						className='task-card-description-wrap'
 					>
-						<p className='task-card-description'>{task.description}</p>
+						<p className='task-card-description'>
+							{htmlToPlainText(task.description)}
+						</p>
 					</div>
 				) : null}
 			</button>

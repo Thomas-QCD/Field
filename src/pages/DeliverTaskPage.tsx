@@ -19,6 +19,7 @@ import {
 	validateAttachmentFile,
 } from '../api/attachments';
 import { createCrewEvent } from '../api/tasks';
+import { captureRequiredGeo } from '../captureGeo';
 import { MultiShotCamera } from '../components/MultiShotCamera';
 import {
 	SignaturePad,
@@ -35,34 +36,6 @@ type DeliverThumb = {
 	/** Object URL for images; null for non-image placeholders. */
 	previewUrl: string | null;
 };
-
-async function captureGeo(): Promise<{
-	latitude?: number;
-	longitude?: number;
-	accuracyMeters?: number;
-	recordedAt: string;
-}> {
-	const recordedAt = new Date().toISOString();
-	if (!navigator.geolocation) return { recordedAt };
-
-	try {
-		const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-			navigator.geolocation.getCurrentPosition(resolve, reject, {
-				enableHighAccuracy: true,
-				timeout: 5000,
-				maximumAge: 30_000,
-			});
-		});
-		return {
-			latitude: pos.coords.latitude,
-			longitude: pos.coords.longitude,
-			accuracyMeters: pos.coords.accuracy,
-			recordedAt,
-		};
-	} catch {
-		return { recordedAt };
-	}
-}
 
 function ActionButton({
 	label,
@@ -278,15 +251,15 @@ export function DeliverTaskPage() {
 		setBusy(true);
 		setError(null);
 		try {
-			const geo = await captureGeo();
+			const geo = await captureRequiredGeo();
 			await createCrewEvent(taskId, {
 				userId: user.id,
 				eventType: 'ended',
 				outcome: 'Completed',
 				notes: parts.join('\n\n'),
-				latitude: geo.latitude ?? null,
-				longitude: geo.longitude ?? null,
-				accuracyMeters: geo.accuracyMeters ?? null,
+				latitude: geo.latitude,
+				longitude: geo.longitude,
+				accuracyMeters: geo.accuracyMeters,
 				recordedAt: geo.recordedAt,
 			});
 			navigate(`/task/${taskId}`, { replace: true });
