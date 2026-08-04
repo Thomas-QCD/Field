@@ -1,5 +1,7 @@
 import { getPool } from "./db.mjs";
 import { recordTaskHistoryEvent } from "./taskHistory.mjs";
+import { generatePublicToken } from "./publicToken.mjs";
+import { parseEquipment } from "../shared/equipment.js";
 import {
   DELIVERY_STATUS_TRANSITIONS,
   STATUS_TRANSITIONS,
@@ -251,17 +253,18 @@ export async function createTask(body) {
   }
 
   const description = asNullableString(body.taskDesc);
+  const jobTitle = asNullableString(body.jobTitle);
+  if (jobTitle && jobTitle.length > 255) {
+    throw Object.assign(new Error("jobTitle must be 255 characters or fewer"), {
+      status: 400,
+    });
+  }
   const externalKey = asNullableString(body.externalKey);
   if (externalKey && externalKey.length > 100) {
     throw Object.assign(new Error("externalKey must be 100 characters or fewer"), {
       status: 400,
     });
   }
-
-  const destinationAddressName = asNullableString(body.destinationAddressName);
-  const destinationAddress = asNullableString(body.destinationAddress);
-  const destinationBuilding = asNullableString(body.destinationBuilding);
-  const destinationNotes = asNullableString(body.destinationNotes);
 
   const rawDestinationAddressId = body.destinationAddressId;
   /** @type {number | null} */
@@ -297,6 +300,8 @@ export async function createTask(body) {
   const estimatedHours = asOptionalNumber(body.hours);
   const canStartEarly = asBool(body.canStartEarly);
   const isTimeSpecific = asBool(body.isTimeSpecific);
+  const isUrgent = asBool(body.isUrgent);
+  const equipment = parseEquipment(body.equipment, taskType);
 
   const crewMemberIds = Array.isArray(body.crewMemberIds)
     ? [...new Set(body.crewMemberIds.map((id) => asString(id)).filter(Boolean))]
@@ -346,25 +351,6 @@ export async function createTask(body) {
           status: 400,
         });
       }
-    } else if (destinationAddress || destinationAddressName) {
-      if (!destinationAddress) {
-        throw Object.assign(
-          new Error("destinationAddress is required when creating a new address"),
-          { status: 400 },
-        );
-      }
-      const { rows } = await client.query(
-        `INSERT INTO addresses (address_name, street_line, building, notes)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id`,
-        [
-          destinationAddressName,
-          destinationAddress,
-          destinationBuilding,
-          destinationNotes,
-        ],
-      );
-      destinationAddressId = Number(rows[0].id);
     }
 
     if (crewMemberIds.length > 0) {
@@ -383,11 +369,14 @@ export async function createTask(body) {
       }
     }
 
+    const publicToken = generatePublicToken();
+
     const { rows: taskRows } = await client.query(
       `INSERT INTO tasks (
          task_type,
          status,
          description,
+         job_title,
          external_key,
          created_by_user_id,
          destination_address_id,
@@ -395,8 +384,11 @@ export async function createTask(body) {
          estimated_hours,
          is_time_specific,
          can_start_early,
+         is_urgent,
+         equipment,
          window_start_at,
-         window_end_at
+         window_end_at,
+         public_token
        ) VALUES (
          $1::task_type,
          $2::task_status,
@@ -409,13 +401,18 @@ export async function createTask(body) {
          $9,
          $10,
          $11,
-         $12
+         $12,
+         $13,
+         $14,
+         $15,
+         $16
        )
-       RETURNING id, status, task_type, destination_address_id`,
+       RETURNING id, status, task_type, destination_address_id, public_token`,
       [
         taskType,
         status,
         description,
+        jobTitle,
         externalKey,
         createdByUserId,
         destinationAddressId,
@@ -423,8 +420,11 @@ export async function createTask(body) {
         estimatedHours,
         isTimeSpecific,
         canStartEarly,
+        isUrgent,
+        equipment,
         windowStartAt,
         windowEndAt,
+        publicToken,
       ],
     );
 
@@ -455,6 +455,7 @@ export async function createTask(body) {
         taskRows[0].destination_address_id != null
           ? Number(taskRows[0].destination_address_id)
           : null,
+      publicToken: String(taskRows[0].public_token ?? publicToken),
       contactIds,
       pocContactId,
       crewMemberIds,
@@ -490,17 +491,18 @@ export async function updateTask(taskId, body) {
   }
 
   const description = asNullableString(body.taskDesc);
+  const jobTitle = asNullableString(body.jobTitle);
+  if (jobTitle && jobTitle.length > 255) {
+    throw Object.assign(new Error("jobTitle must be 255 characters or fewer"), {
+      status: 400,
+    });
+  }
   const externalKey = asNullableString(body.externalKey);
   if (externalKey && externalKey.length > 100) {
     throw Object.assign(new Error("externalKey must be 100 characters or fewer"), {
       status: 400,
     });
   }
-
-  const destinationAddressName = asNullableString(body.destinationAddressName);
-  const destinationAddress = asNullableString(body.destinationAddress);
-  const destinationBuilding = asNullableString(body.destinationBuilding);
-  const destinationNotes = asNullableString(body.destinationNotes);
 
   const rawDestinationAddressId = body.destinationAddressId;
   /** @type {number | null} */
@@ -536,6 +538,8 @@ export async function updateTask(taskId, body) {
   const estimatedHours = asOptionalNumber(body.hours);
   const canStartEarly = asBool(body.canStartEarly);
   const isTimeSpecific = asBool(body.isTimeSpecific);
+  const isUrgent = asBool(body.isUrgent);
+  const equipment = parseEquipment(body.equipment, taskType);
 
   const crewMemberIds = Array.isArray(body.crewMemberIds)
     ? [...new Set(body.crewMemberIds.map((id) => asString(id)).filter(Boolean))]
@@ -588,25 +592,6 @@ export async function updateTask(taskId, body) {
           status: 400,
         });
       }
-    } else if (destinationAddress || destinationAddressName) {
-      if (!destinationAddress) {
-        throw Object.assign(
-          new Error("destinationAddress is required when creating a new address"),
-          { status: 400 },
-        );
-      }
-      const { rows } = await client.query(
-        `INSERT INTO addresses (address_name, street_line, building, notes)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id`,
-        [
-          destinationAddressName,
-          destinationAddress,
-          destinationBuilding,
-          destinationNotes,
-        ],
-      );
-      destinationAddressId = Number(rows[0].id);
     }
 
     if (crewMemberIds.length > 0) {
@@ -630,14 +615,17 @@ export async function updateTask(taskId, body) {
          task_type = $2::task_type,
          status = COALESCE($3::task_status, status),
          description = $4,
-         external_key = $5,
-         destination_address_id = $6,
-         crew_size = $7,
-         estimated_hours = $8,
-         is_time_specific = $9,
-         can_start_early = $10,
-         window_start_at = $11,
-         window_end_at = $12,
+         job_title = $5,
+         external_key = $6,
+         destination_address_id = $7,
+         crew_size = $8,
+         estimated_hours = $9,
+         is_time_specific = $10,
+         can_start_early = $11,
+         is_urgent = $12,
+         equipment = $13,
+         window_start_at = $14,
+         window_end_at = $15,
          updated_at = now()
        WHERE id = $1
        RETURNING id, status, task_type, destination_address_id`,
@@ -646,12 +634,15 @@ export async function updateTask(taskId, body) {
         taskType,
         nextStatus,
         description,
+        jobTitle,
         externalKey,
         destinationAddressId,
         crewSize,
         estimatedHours,
         isTimeSpecific,
         canStartEarly,
+        isUrgent,
+        equipment,
         windowStartAt,
         windowEndAt,
       ],

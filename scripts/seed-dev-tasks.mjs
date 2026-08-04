@@ -4,6 +4,7 @@
  * Usage: node scripts/seed-dev-tasks.mjs
  *        node scripts/seed-dev-tasks.mjs --dry-run
  */
+import { randomBytes } from "node:crypto";
 import { createPgClient } from "./lib/db.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -1320,19 +1321,20 @@ async function enrichContacts(client) {
  * @param {SeedTask} t
  */
 async function insertTask(client, t) {
+  const publicToken = randomBytes(32).toString("base64url");
   await client.query(
     `INSERT INTO tasks (
        id, task_type, status, description, external_key, created_by_user_id,
        destination_address_id, crew_size, estimated_hours,
        is_time_specific, can_start_early, window_start_at, window_end_at,
        completed_notes, completed_at, failed_reason,
-       deleted_at, created_at, updated_at
+       deleted_at, created_at, updated_at, public_token
      ) VALUES (
        $1, $2::task_type, $3::task_status, $4, $5, $6::uuid,
        $7, $8, $9,
        $10, $11, $12::timestamptz, $13::timestamptz,
        $14, $15::timestamptz, $16,
-       $17::timestamptz, $18::timestamptz, $19::timestamptz
+       $17::timestamptz, $18::timestamptz, $19::timestamptz, $20
      )`,
     [
       t.id,
@@ -1354,6 +1356,7 @@ async function insertTask(client, t) {
       t.deletedAt ?? null,
       t.createdAt,
       t.updatedAt,
+      publicToken,
     ],
   );
 

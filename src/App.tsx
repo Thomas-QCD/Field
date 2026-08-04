@@ -20,6 +20,7 @@ import { CompleteTaskPage } from './pages/CompleteTaskPage';
 import { DeliverTaskPage } from './pages/DeliverTaskPage';
 import { TaskViewPage } from './pages/TaskViewPage';
 import { UsersPage } from './pages/UsersPage';
+import { PublicTaskPage } from './pages/PublicTaskPage';
 
 function HomeRedirect() {
 	const { user, loading } = useCurrentUser();
@@ -49,44 +50,59 @@ function DeliveryRoute() {
 	return <TasksPage mode='delivery' />;
 }
 
+function AuthenticatedApp() {
+	return (
+		<AuthRoot>
+			<CurrentUserProvider>
+				<MobileAuthGate>
+					<NotificationTapListener />
+					<Routes>
+						<Route element={<FieldAppShell />}>
+							<Route path='/' element={<HomeRedirect />} />
+							<Route
+								path='/tasks'
+								element={<TasksPage key='all' mode='all' />}
+							/>
+							<Route
+								path='/my-tasks'
+								element={<TasksPage key='mine' mode='mine' />}
+							/>
+							<Route path='/delivery' element={<DeliveryRoute />} />
+							<Route
+								path='/task/:taskId/complete'
+								element={<CompleteTaskPage />}
+							/>
+							<Route
+								path='/task/:taskId/deliver'
+								element={<DeliverTaskPage />}
+							/>
+							<Route path='/task/:taskId' element={<TaskViewPage />} />
+							<Route path='/contacts' element={<ContactsPage />} />
+							<Route path='/addresses' element={<AddressesPage />} />
+							<Route path='/users' element={<UsersPage />} />
+							<Route path='/crew-map' element={<CrewMapPage />} />
+							<Route path='/more' element={<MorePage />} />
+							<Route
+								path='/notifications'
+								element={<NotificationsPage />}
+							/>
+							<Route path='*' element={<Navigate to='/' replace />} />
+						</Route>
+					</Routes>
+				</MobileAuthGate>
+			</CurrentUserProvider>
+		</AuthRoot>
+	);
+}
+
 export default function App() {
 	return (
 		<BrowserRouter>
 			<DocumentTitle />
-			<NotificationTapListener />
-			<AuthRoot>
-				<CurrentUserProvider>
-					<MobileAuthGate>
-						<Routes>
-							<Route element={<FieldAppShell />}>
-								<Route path='/' element={<HomeRedirect />} />
-								<Route path='/tasks' element={<TasksPage mode='all' />} />
-								<Route path='/my-tasks' element={<TasksPage mode='mine' />} />
-								<Route path='/delivery' element={<DeliveryRoute />} />
-								<Route
-									path='/task/:taskId/complete'
-									element={<CompleteTaskPage />}
-								/>
-								<Route
-									path='/task/:taskId/deliver'
-									element={<DeliverTaskPage />}
-								/>
-								<Route path='/task/:taskId' element={<TaskViewPage />} />
-								<Route path='/contacts' element={<ContactsPage />} />
-								<Route path='/addresses' element={<AddressesPage />} />
-								<Route path='/users' element={<UsersPage />} />
-								<Route path='/crew-map' element={<CrewMapPage />} />
-								<Route path='/more' element={<MorePage />} />
-								<Route
-									path='/notifications'
-									element={<NotificationsPage />}
-								/>
-								<Route path='*' element={<Navigate to='/' replace />} />
-							</Route>
-						</Routes>
-					</MobileAuthGate>
-				</CurrentUserProvider>
-			</AuthRoot>
+			<Routes>
+				<Route path='/t/:token' element={<PublicTaskPage />} />
+				<Route path='/*' element={<AuthenticatedApp />} />
+			</Routes>
 		</BrowserRouter>
 	);
 }

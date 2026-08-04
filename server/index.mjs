@@ -26,6 +26,14 @@ import {
 } from "./mobileAuth.mjs";
 import { generateAndStoreDeliveryDocket } from "./deliveryDocket.mjs";
 import {
+  publicTrackingPath,
+  publicTrackingUrl,
+} from "./publicToken.mjs";
+import {
+  getPublicDocument,
+  getPublicTaskByToken,
+} from "./publicTask.mjs";
+import {
   purgeExpiredCancelledTasks,
   startCancelledTaskPurgeScheduler,
 } from "./purgeCancelledTasks.mjs";
@@ -666,7 +674,7 @@ async function listCrewLocations() {
 }
 
 /**
- * @param {{ crewMemberId?: string | null }} [opts]
+ * @param {{ crewMemberId?: string | null, createdByUserId?: string | null }} [opts]
  */
 async function listTasks(opts = {}) {
   await purgeExpiredCancelledTasks();
@@ -676,18 +684,30 @@ async function listTasks(opts = {}) {
     typeof opts.crewMemberId === "string" && opts.crewMemberId.trim()
       ? opts.crewMemberId.trim()
       : null;
+  const createdByUserId =
+    typeof opts.createdByUserId === "string" && opts.createdByUserId.trim()
+      ? opts.createdByUserId.trim()
+      : null;
   const params = [];
   let crewClause = "";
-  if (crewMemberId) {
-    params.push(crewMemberId);
+  if (crewMemberId || createdByUserId) {
     // Cancelled tasks stay on All Tasks / Delivery Cancelled only — not member lists.
-    crewClause = `AND t.status <> 'Cancelled'::task_status
-       AND EXISTS (
+    const parts = [];
+    if (crewMemberId) {
+      params.push(crewMemberId);
+      parts.push(`EXISTS (
          SELECT 1
          FROM task_crew_members tcm_filter
          WHERE tcm_filter.task_id = t.id
            AND tcm_filter.user_id = $${params.length}
-       )`;
+       )`);
+    }
+    if (createdByUserId) {
+      params.push(createdByUserId);
+      parts.push(`t.created_by_user_id = $${params.length}`);
+    }
+    crewClause = `AND t.status <> 'Cancelled'::task_status
+       AND (${parts.join(" OR ")})`;
   }
 
   const { rows } = await pool.query(
@@ -696,10 +716,12 @@ async function listTasks(opts = {}) {
        t.task_type,
        t.status,
        t.external_key,
+       t.job_title,
        t.description,
        t.window_start_at,
        t.window_end_at,
        t.cancelled_at,
+       t.public_token,
        cu.display_name AS created_by_name,
        (
          SELECT string_agg(c.name, ', ' ORDER BY tc.is_poc DESC, c.name)
@@ -738,6 +760,7 @@ async function listTasks(opts = {}) {
     taskType: row.task_type,
     status: row.status,
     externalKey: row.external_key ?? "",
+    jobTitle: row.job_title ?? "",
     description: row.description ?? "",
     contactNames: row.contact_names ?? "",
     destinationAddressName: row.destination_address_name ?? "",
@@ -755,6 +778,13 @@ async function listTasks(opts = {}) {
     cancelledAt: row.cancelled_at
       ? new Date(row.cancelled_at).toISOString()
       : null,
+    publicToken: row.public_token ? String(row.public_token) : "",
+    publicTrackingPath: row.public_token
+      ? publicTrackingPath(String(row.public_token))
+      : "",
+    publicTrackingUrl: row.public_token
+      ? publicTrackingUrl(String(row.public_token))
+      : "",
   }));
 }
 
@@ -769,11 +799,14 @@ async function getTask(id) {
        t.task_type,
        t.status,
        t.description,
+       t.job_title,
        t.external_key,
        t.crew_size,
        t.estimated_hours,
        t.is_time_specific,
        t.can_start_early,
+       t.is_urgent,
+       t.equipment,
        t.window_start_at,
        t.window_end_at,
        t.completed_notes,
@@ -782,6 +815,7 @@ async function getTask(id) {
        t.cancelled_at,
        t.created_at,
        t.updated_at,
+       t.public_token,
        t.destination_address_id,
        COALESCE(a.address_name, '') AS destination_address_name,
        COALESCE(a.street_line, '') AS destination_address,
@@ -855,6 +889,7 @@ async function getTask(id) {
     taskType: row.task_type,
     status: row.status,
     description: row.description ?? "",
+    jobTitle: row.job_title ?? "",
     externalKey: row.external_key ?? "",
     destinationAddressId:
       row.destination_address_id != null
@@ -879,6 +914,8 @@ async function getTask(id) {
       row.estimated_hours != null ? Number(row.estimated_hours) : null,
     isTimeSpecific: Boolean(row.is_time_specific),
     canStartEarly: Boolean(row.can_start_early),
+    isUrgent: Boolean(row.is_urgent),
+    equipment: Array.isArray(row.equipment) ? row.equipment.map(String) : [],
     windowStartAt: row.window_start_at
       ? new Date(row.window_start_at).toISOString()
       : null,
@@ -901,6 +938,13 @@ async function getTask(id) {
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     createdByName: row.created_by_name ?? "",
+    publicToken: row.public_token ? String(row.public_token) : "",
+    publicTrackingPath: row.public_token
+      ? publicTrackingPath(String(row.public_token))
+      : "",
+    publicTrackingUrl: row.public_token
+      ? publicTrackingUrl(String(row.public_token))
+      : "",
     crewMembers: Array.isArray(row.crew_members)
       ? row.crew_members.map((m) => ({
           id: String(m.id),
@@ -924,6 +968,32 @@ const server = createServer(async (req, res) => {
     const url = parseUrl(req.url ?? "/");
 
     await requireWebAuth(req, url.pathname);
+
+    const publicTaskMatch = url.pathname.match(
+      /^\/api\/public\/tasks\/([^/]+)$/,
+    );
+    if (req.method === "GET" && publicTaskMatch) {
+      const payload = await getPublicTaskByToken(
+        decodeURIComponent(publicTaskMatch[1]),
+      );
+      sendJson(res, payload);
+      return;
+    }
+
+    const publicDocMatch = url.pathname.match(
+      /^\/api\/public\/tasks\/([^/]+)\/documents\/([^/]+)$/,
+    );
+    if (req.method === "GET" && publicDocMatch) {
+      const { buffer, fileName } = await getPublicDocument(
+        decodeURIComponent(publicDocMatch[1]),
+        decodeURIComponent(publicDocMatch[2]),
+        getTask,
+      );
+      const disposition =
+        url.searchParams.get("download") === "1" ? "attachment" : "inline";
+      sendPdf(res, buffer, fileName, disposition);
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/api/auth/session") {
       if (!isEntraAuthEnabled()) {
@@ -1122,7 +1192,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/tasks") {
       const crewMemberId =
         (url.searchParams.get("crewMemberId") ?? "").trim() || null;
-      const tasks = await listTasks({ crewMemberId });
+      const createdByUserId =
+        (url.searchParams.get("createdByUserId") ?? "").trim() || null;
+      const tasks = await listTasks({ crewMemberId, createdByUserId });
       sendJson(res, { tasks });
       return;
     }

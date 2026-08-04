@@ -15,6 +15,7 @@ import {
 } from '@mantine/core';
 import {
 	Ellipsis,
+	ExternalLink,
 	FileText,
 	Pencil,
 	Printer,
@@ -321,8 +322,7 @@ export function TaskDetailModal({
 	};
 
 	const statusOptions: TaskStatus[] = task
-		? ((statusTransitionsFor(task.taskType)[task.status] ??
-				[]) as TaskStatus[])
+		? ((statusTransitionsFor(task.taskType)[task.status] ?? []) as TaskStatus[])
 		: [];
 
 	const title =
@@ -467,8 +467,8 @@ export function TaskDetailModal({
 																	onClick={() => void handleSaveOutcome()}
 																>
 																	{pendingOutcome === 'Failed'
-																		? 'Complete'
-																		: 'Mark Failed'}
+																		? 'Mark Failed'
+																		: 'Complete'}
 																</Button>
 																<Button
 																	variant='default'
@@ -540,6 +540,12 @@ export function TaskDetailModal({
 											crewMembers={task.crewMembers}
 										/>
 
+										{task.jobTitle?.trim() ? (
+											<p className='task-detail-job-title'>
+												{task.jobTitle.trim()}
+											</p>
+										) : null}
+
 										<DetailFields>
 											<DetailField
 												label='Created by'
@@ -551,9 +557,7 @@ export function TaskDetailModal({
 											/>
 											{!isEmptyTaskDesc(task.description) ? (
 												<>
-													<dt className='task-detail-field-key'>
-														Description
-													</dt>
+													<dt className='task-detail-field-key'>Description</dt>
 													<dd className='task-detail-field-value'>
 														<TaskDescHtml value={task.description} />
 													</dd>
@@ -694,6 +698,16 @@ export function TaskDetailModal({
 													label='Can start early'
 													value={task.canStartEarly ? 'Yes' : 'No'}
 												/>
+												<DetailField
+													label='Urgent'
+													value={task.isUrgent ? 'Yes' : 'No'}
+												/>
+												{task.equipment.length > 0 ? (
+													<DetailField
+														label='Equipment'
+														value={task.equipment.join(' · ')}
+													/>
+												) : null}
 											</DetailFields>
 										</Section>
 									</Stack>
@@ -762,6 +776,19 @@ export function TaskDetailModal({
 										</Button>
 									</Menu.Target>
 									<Menu.Dropdown>
+										{task.publicTrackingPath || task.publicToken ? (
+											<Menu.Item
+												component='a'
+												href={
+													task.publicTrackingPath || `/t/${task.publicToken}`
+												}
+												target='_blank'
+												rel='noopener noreferrer'
+												leftSection={<ExternalLink size={16} />}
+											>
+												Open tracking page
+											</Menu.Item>
+										) : null}
 										<Menu.Item
 											leftSection={<Printer size={16} />}
 											onClick={() => handlePrintUnavailable('Print task')}

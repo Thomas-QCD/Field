@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 export const WODELY_SYNC_USER_ID = "a0000000-0000-4000-8000-000000000001";
 
 const FIELD_STATUSES = new Set([
@@ -10,6 +12,11 @@ const FIELD_STATUSES = new Set([
   "Undetermined",
   "Cancelled",
 ]);
+
+/** @returns {string} */
+function generatePublicToken() {
+  return randomBytes(32).toString("base64url");
+}
 
 /**
  * @param {Record<string, unknown>} obj
@@ -356,7 +363,8 @@ export async function persistFieldTask(raw, options = {}) {
          completed_at,
          failed_reason,
          created_at,
-         updated_at
+         updated_at,
+         public_token
        ) VALUES (
          $1,
          $2::task_type,
@@ -375,7 +383,8 @@ export async function persistFieldTask(raw, options = {}) {
          $15,
          $16,
          COALESCE($17::timestamptz, now()),
-         COALESCE($18::timestamptz, now())
+         COALESCE($18::timestamptz, now()),
+         $19
        )
        ON CONFLICT (id) DO UPDATE SET
          task_type = EXCLUDED.task_type,
@@ -414,6 +423,7 @@ export async function persistFieldTask(raw, options = {}) {
         task.taskFailedReason,
         createdAt,
         modifiedAt,
+        generatePublicToken(),
       ],
     );
 

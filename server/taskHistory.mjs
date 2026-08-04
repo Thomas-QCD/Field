@@ -285,9 +285,134 @@ export async function getTaskHistory(taskId) {
     latitude: numOrNull(row.latitude),
     longitude: numOrNull(row.longitude),
     accuracyMeters: numOrNull(row.accuracy_meters),
+    count: null,
   }));
 
-  return coalesceRelatedHistoryEvents(events);
+  return coalesceAttachmentHistoryEvents(coalesceRelatedHistoryEvents(events));
+}
+
+/**
+ * Customer-safe timeline: status milestones + docket/POD documents only.
+ * No crew names, GPS, emails, attachments, or completion notes.
+ * @param {number} taskId
+ */
+export async function getPublicTaskHistory(taskId) {
+  if (!Number.isInteger(taskId) || taskId < 1) {
+    throw Object.assign(new Error("Invalid task id"), { status: 400 });
+  }
+
+  const pool = getPool();
+
+  const exists = await pool.query(
+    `SELECT 1 FROM tasks WHERE id = $1 AND deleted_at IS NULL`,
+    [taskId],
+  );
+  if (exists.rowCount === 0) {
+    throw Object.assign(new Error("Task not found"), { status: 404 });
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT * FROM (
+      SELECT
+        'created:' || t.id::text AS id,
+        'created'::text AS event_type,
+        t.created_at AS recorded_at,
+        NULL::text AS from_status,
+        NULL::text AS to_status,
+        NULL::text AS detail
+      FROM tasks t
+      WHERE t.id = $1
+
+      UNION ALL
+
+      SELECT
+        'history:' || h.id::text AS id,
+        h.event_type,
+        h.recorded_at,
+        h.from_status::text,
+        h.to_status::text,
+        NULL::text AS detail
+      FROM task_history_events h
+      WHERE h.task_id = $1
+        AND h.event_type IN ('status_changed', 'cancelled', 'restored', 'created')
+
+      UNION ALL
+
+      SELECT
+        'document:' || d.id::text AS id,
+        'document_generated'::text AS event_type,
+        d.generated_at AS recorded_at,
+        NULL::text AS from_status,
+        NULL::text AS to_status,
+        d.kind AS detail
+      FROM task_documents d
+      WHERE d.task_id = $1
+        AND d.kind IN ('delivery_docket', 'pod')
+
+      UNION ALL
+
+      SELECT
+        'cancelled:' || t.id::text AS id,
+        'cancelled'::text AS event_type,
+        t.cancelled_at AS recorded_at,
+        t.status_before_cancel::text AS from_status,
+        'Cancelled'::text AS to_status,
+        NULL::text AS detail
+      FROM tasks t
+      WHERE t.id = $1
+        AND t.cancelled_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM task_history_events h
+          WHERE h.task_id = t.id
+            AND h.event_type IN ('status_changed', 'cancelled')
+            AND h.to_status = 'Cancelled'::task_status
+        )
+    ) events
+    ORDER BY recorded_at ASC, id ASC
+    `,
+    [taskId],
+  );
+
+  return rows.map((row) => {
+    const type = String(row.event_type);
+    const fromStatus = row.from_status ? String(row.from_status) : null;
+    const toStatus = row.to_status ? String(row.to_status) : null;
+    const detail = row.detail ? String(row.detail) : null;
+
+    let title = type;
+    if (type === "created") {
+      title = "Order received";
+    } else if (type === "cancelled") {
+      title = fromStatus
+        ? `Cancelled (was ${fromStatus})`
+        : "Cancelled";
+    } else if (type === "restored") {
+      title = `Restored to ${toStatus ?? "Undetermined"}`;
+    } else if (type === "status_changed") {
+      title =
+        fromStatus && toStatus
+          ? `Status ${fromStatus} → ${toStatus}`
+          : toStatus
+            ? `Status → ${toStatus}`
+            : "Status updated";
+    } else if (type === "document_generated") {
+      if (detail === "pod") title = "Proof of delivery available";
+      else if (detail === "delivery_docket") title = "Delivery docket available";
+      else title = "Document available";
+    }
+
+    return {
+      id: String(row.id),
+      type,
+      at: isoOrNull(row.recorded_at),
+      title,
+      fromStatus,
+      toStatus,
+      detail,
+    };
+  });
 }
 
 /**
@@ -306,6 +431,7 @@ export async function getTaskHistory(taskId) {
  *   latitude: number | null,
  *   longitude: number | null,
  *   accuracyMeters: number | null,
+ *   count: number | null,
  * }>} events
  */
 function coalesceRelatedHistoryEvents(events) {
@@ -360,6 +486,77 @@ function coalesceRelatedHistoryEvents(events) {
       /^Status changed via crew (started|ended)$/.test(event.summary)
     );
   });
+}
+
+/**
+ * Burst uploads (multi-shot camera, gallery pick) produce many attachment rows.
+ * Fold same-actor + same-kind adds within a few minutes into one timeline row.
+ *
+ * @param {Array<{
+ *   id: string,
+ *   type: string,
+ *   at: string | null,
+ *   actorName: string | null,
+ *   fromStatus: string | null,
+ *   toStatus: string | null,
+ *   summary: string | null,
+ *   detail: string | null,
+ *   latitude: number | null,
+ *   longitude: number | null,
+ *   accuracyMeters: number | null,
+ *   count: number | null,
+ * }>} events
+ */
+function coalesceAttachmentHistoryEvents(events) {
+  /** @type {typeof events} */
+  const out = [];
+  const ATTACHMENT_BURST_MS = 5 * 60 * 1000;
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (event.type !== "attachment_added") {
+      out.push(event);
+      continue;
+    }
+
+    let count = 1;
+    let lastAt = event.at;
+    let j = i + 1;
+    while (j < events.length) {
+      const next = events[j];
+      if (next.type !== "attachment_added") break;
+      if (!sameAttachmentBatch(event, next)) break;
+      if (!nearHistoryTime(lastAt, next.at, ATTACHMENT_BURST_MS)) break;
+      count += 1;
+      lastAt = next.at;
+      j += 1;
+    }
+
+    if (count === 1) {
+      out.push(event);
+    } else {
+      out.push({
+        ...event,
+        // Drop per-file names — the batch count is the useful signal.
+        summary: null,
+        count,
+      });
+      i = j - 1;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * @param {{ actorName: string | null, detail: string | null }} a
+ * @param {{ actorName: string | null, detail: string | null }} b
+ */
+function sameAttachmentBatch(a, b) {
+  if ((a.detail ?? null) !== (b.detail ?? null)) return false;
+  if (!a.actorName && !b.actorName) return true;
+  if (!a.actorName || !b.actorName) return false;
+  return a.actorName === b.actorName;
 }
 
 /**

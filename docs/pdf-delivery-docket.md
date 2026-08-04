@@ -58,7 +58,7 @@ Single page, portrait, white background. Label/value rows (label left, value rig
 
 | Element | Notes |
 |---------|--------|
-| Logo | `public/logoColor.png` — square brand mark, top-left |
+| Logo | `public/logo-qcd.png` — QCD wordmark (print/dark), top-left |
 | Title | Literal `Delivery Docket` — top-right, vertically centered with logo |
 | Task ID | Short/hex style in sample (`28D5AAE802`); Field may use numeric `Id` until format is decided |
 | External ID | `ExternalKey` — same header row as Task ID |

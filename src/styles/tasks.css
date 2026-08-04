@@ -125,6 +125,15 @@
 	min-width: 0;
 }
 
+.task-detail-job-title {
+	margin: 0;
+	font-size: 0.95rem;
+	font-weight: 600;
+	line-height: 1.4;
+	color: var(--color-text);
+	overflow-wrap: anywhere;
+}
+
 .task-detail-contact-name {
 	display: block;
 	font-weight: 600;
@@ -812,6 +821,15 @@
 	gap: 0.35rem;
 }
 
+.task-card-job-title {
+	margin: 0;
+	font-size: 0.9rem;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--color-text);
+	overflow-wrap: anywhere;
+}
+
 .task-card-row {
 	display: grid;
 	grid-template-columns: 5.5rem 1fr;
@@ -1211,6 +1229,14 @@
 	padding-bottom: 1.5rem;
 }
 
+.task-view-body > .task-view-section {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	padding-top: 0.85rem;
+	border-top: 1px solid var(--color-border);
+}
+
 .task-view-actions {
 	display: grid;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1321,6 +1347,15 @@
 	background: var(--color-accent-subtle);
 }
 
+.task-view-job-title {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--color-text);
+	overflow-wrap: anywhere;
+}
+
 .task-view-address {
 	margin: 0;
 	font-size: 1.05rem;
@@ -1347,11 +1382,39 @@
 	overflow-wrap: anywhere;
 }
 
-.task-view-row {
+.task-view-meta {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-	gap: 0.65rem 1rem;
+	column-gap: 1rem;
+	row-gap: 0;
 	width: 100%;
+	min-width: 0;
+	padding: 0 0.7rem;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	background: var(--color-surface-raised);
+}
+
+.task-view-meta .task-view-field {
+	flex-direction: row;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.4rem;
+	padding: 0.45rem 0;
+	border-bottom: 1px solid var(--color-border);
+}
+
+.task-view-meta .task-view-field:nth-last-child(-n + 2) {
+	border-bottom: none;
+}
+
+.task-view-meta .task-view-field-label {
+	flex-shrink: 0;
+}
+
+.task-view-meta .task-view-field-value,
+.task-view-meta .task-status {
+	text-align: right;
 	min-width: 0;
 }
 
@@ -1506,9 +1569,7 @@
 }
 
 .task-view-description {
-	margin: 0.25rem 0 0;
-	padding-top: 0.85rem;
-	border-top: 1px solid var(--color-border);
+	margin: 0;
 	font-size: 0.9rem;
 	line-height: 1.5;
 	color: var(--color-text);

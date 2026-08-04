@@ -15,10 +15,11 @@ import {
 	UnstyledButton,
 	Pill,
 	Input,
+	Switch,
 } from '@mantine/core';
 import { DateTimePicker } from '@mantine/dates';
 import {
-	ClipboardList,
+	ClipboardCheck,
 	StickyNote,
 	MapPin,
 	Building2,
@@ -30,8 +31,19 @@ import {
 	Plus,
 	Paperclip,
 	Trash2,
+	Truck,
+	Wrench,
+	PackageMinus,
+	Package,
+	CircleHelp,
+	HardHat,
+	type LucideIcon,
 } from 'lucide-react';
 import type { TaskType } from '../types/task';
+import {
+	EQUIPMENT_OPTIONS,
+	taskTypeUsesEquipment,
+} from '../../shared/equipment.js';
 import {
 	attachmentAcceptAttr,
 	validateAttachmentFile,
@@ -53,6 +65,15 @@ function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const TASK_TYPE_ICONS: Record<TaskType, LucideIcon> = {
+	Delivery: Truck,
+	Install: Wrench,
+	Removal: PackageMinus,
+	'Site Survey': ClipboardCheck,
+	Pickup: Package,
+	Other: CircleHelp,
+};
+
 const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
 	{ value: 'Delivery', label: 'Delivery' },
 	{ value: 'Install', label: 'Install' },
@@ -62,12 +83,15 @@ const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
 	{ value: 'Other', label: 'Other' },
 ];
 
-const YES_NO_OPTIONS = [
-	{ value: 'false', label: 'No' },
-	{ value: 'true', label: 'Yes' },
-];
-
 const inputSize = 'sm' as const;
+
+const switchAlignStyles = {
+	root: {
+		display: 'flex',
+		alignItems: 'center',
+		minHeight: 36,
+	},
+};
 
 /** Clear (X) control for TextInput / Textarea — Mantine only wires clearable on select-like inputs. */
 function textClearSection(
@@ -84,6 +108,13 @@ function textClearSection(
 			}}
 		/>
 	);
+}
+
+/** One-shot grow-to-content (keeps CSS resize usable — unlike Mantine autosize). */
+function fitTextareaToContent(el: HTMLTextAreaElement | null) {
+	if (!el) return;
+	el.style.height = 'auto';
+	el.style.height = `${el.scrollHeight}px`;
 }
 
 /** Dropdown only after the user types — click/focus on an empty field stays closed. */
@@ -148,6 +179,7 @@ export interface NewTaskFormValues {
 	pocContactId: number | null;
 	taskType: TaskType;
 	externalKey: string;
+	jobTitle: string;
 	taskDesc: string;
 	destinationAddressId: number | null;
 	destinationAddressName: string;
@@ -159,8 +191,10 @@ export interface NewTaskFormValues {
 	crewMemberIds: string[];
 	guys: number | string;
 	hours: number | string;
-	canStartEarly: string;
-	isTimeSpecific: string;
+	canStartEarly: boolean;
+	isTimeSpecific: boolean;
+	isUrgent: boolean;
+	equipment: string[];
 }
 
 /** First contact in the list is always the POC. */
@@ -189,6 +223,7 @@ function createEmptyForm(): NewTaskFormValues {
 		pocContactId: null,
 		taskType: 'Delivery',
 		externalKey: '',
+		jobTitle: '',
 		taskDesc: '',
 		destinationAddressId: null,
 		destinationAddressName: '',
@@ -200,8 +235,10 @@ function createEmptyForm(): NewTaskFormValues {
 		crewMemberIds: [],
 		guys: '',
 		hours: '',
-		canStartEarly: 'false',
-		isTimeSpecific: 'false',
+		canStartEarly: false,
+		isTimeSpecific: false,
+		isUrgent: false,
+		equipment: [],
 	};
 }
 
@@ -232,6 +269,7 @@ export function NewTaskModal({
 	const isEdit = initialValues != null;
 	const attachmentInputId = useId();
 	const attachmentInputRef = useRef<HTMLInputElement>(null);
+	const destinationNotesRef = useRef<HTMLTextAreaElement>(null);
 	const [form, setForm] = useState<NewTaskFormValues>(createEmptyForm);
 	const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 	const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -269,6 +307,14 @@ export function NewTaskModal({
 		value: NewTaskFormValues[K],
 	) => {
 		setForm((prev) => ({ ...prev, [key]: value }));
+	};
+
+	const setTaskType = (taskType: TaskType) => {
+		setForm((prev) => ({
+			...prev,
+			taskType,
+			equipment: taskTypeUsesEquipment(taskType) ? prev.equipment : [],
+		}));
 	};
 
 	const reset = () => {
@@ -430,6 +476,16 @@ export function NewTaskModal({
 		if (attachmentInputRef.current) attachmentInputRef.current.value = '';
 	}, [opened, initialValues, initialContactOptions]);
 
+	// Grow once when notes change (venue fill / edit hydrate). Do not use Mantine
+	// autosize — it continuously locks height and breaks the resize handle.
+	useEffect(() => {
+		if (!opened) return;
+		const id = requestAnimationFrame(() => {
+			fitTextareaToContent(destinationNotesRef.current);
+		});
+		return () => cancelAnimationFrame(id);
+	}, [opened, form.destinationNotes]);
+
 	useEffect(() => {
 		if (!opened) return;
 
@@ -506,6 +562,8 @@ export function NewTaskModal({
 		return () => controller.abort();
 	}, [opened]);
 
+	const TaskTypeIcon = TASK_TYPE_ICONS[form.taskType];
+
 	return (
 		<KeyboardAwareModal
 			opened={opened}
@@ -534,8 +592,17 @@ export function NewTaskModal({
 						size={inputSize}
 						data={TASK_TYPE_OPTIONS}
 						value={form.taskType}
-						onChange={(v) => update('taskType', (v as TaskType) ?? 'Delivery')}
-						leftSection={<ClipboardList size={16} />}
+						onChange={(v) => setTaskType((v as TaskType) ?? 'Delivery')}
+						leftSection={<TaskTypeIcon size={16} />}
+						renderOption={({ option }) => {
+							const Icon = TASK_TYPE_ICONS[option.value as TaskType];
+							return (
+								<Group gap={8} wrap='nowrap'>
+									<Icon size={16} />
+									<span>{option.label}</span>
+								</Group>
+							);
+						}}
 						allowDeselect={false}
 						disabled={saving}
 					/>
@@ -548,6 +615,14 @@ export function NewTaskModal({
 						disabled={saving}
 					/>
 				</SimpleGrid>
+				<TextInput
+					size={inputSize}
+					placeholder='Job Title'
+					value={form.jobTitle}
+					onChange={(e) => update('jobTitle', e.currentTarget.value)}
+					maxLength={255}
+					disabled={saving}
+				/>
 
 				<TaskDescEditor
 					value={form.taskDesc}
@@ -756,8 +831,8 @@ export function NewTaskModal({
 						disabled={saving}
 					/>
 					<Textarea
+						ref={destinationNotesRef}
 						size={inputSize}
-						autosize
 						placeholder='Instructions or notes'
 						minRows={2}
 						resize='vertical'
@@ -820,42 +895,79 @@ export function NewTaskModal({
 					/>
 				</SimpleGrid>
 
-				<Text fz={14} fw={600}>
-					Assign To
-				</Text>
-				<MultiSelect
-					size={inputSize}
-					data={crewOptions}
-					value={form.crewMemberIds}
-					onChange={(v) => update('crewMemberIds', v)}
-					placeholder={
-						form.crewMemberIds.length === 0 ? 'Crew not assigned' : undefined
-					}
-					leftSection={<Users size={16} />}
-					loading={crewLoading}
-					comboboxProps={{ shadow: 'xl' }}
-					maxDropdownHeight={400}
-					styles={{
-						dropdown: {
-							backgroundColor: 'var(--mantine-color-gray-2)',
-							border: '1px solid var(--mantine-primary-color-filled)',
-						},
-						option: {
-							borderRadius: 4,
-						},
+				<SimpleGrid
+					cols={{
+						base: 1,
+						sm: taskTypeUsesEquipment(form.taskType) ? 2 : 1,
 					}}
-					searchable
-					clearable
-					hidePickedOptions
-					openOnFocus={crewDropdown.openOnFocus}
-					dropdownOpened={crewDropdown.dropdownOpened}
-					onDropdownClose={crewDropdown.onDropdownClose}
-					onSearchChange={crewDropdown.onSearchChange}
-					nothingFoundMessage={
-						crewLoading ? 'Loading…' : 'No crew members found'
-					}
-					disabled={saving}
-				/>
+					spacing={6}
+				>
+					<MultiSelect
+						size={inputSize}
+						label='Assign To'
+						data={crewOptions}
+						value={form.crewMemberIds}
+						onChange={(v) => update('crewMemberIds', v)}
+						placeholder={
+							form.crewMemberIds.length === 0
+								? 'Crew not assigned'
+								: undefined
+						}
+						leftSection={<Users size={16} />}
+						loading={crewLoading}
+						comboboxProps={{ shadow: 'xl' }}
+						maxDropdownHeight={400}
+						styles={{
+							dropdown: {
+								backgroundColor: 'var(--mantine-color-gray-2)',
+								border: '1px solid var(--mantine-primary-color-filled)',
+							},
+							option: {
+								borderRadius: 4,
+							},
+						}}
+						searchable
+						clearable
+						hidePickedOptions
+						openOnFocus={crewDropdown.openOnFocus}
+						dropdownOpened={crewDropdown.dropdownOpened}
+						onDropdownClose={crewDropdown.onDropdownClose}
+						onSearchChange={crewDropdown.onSearchChange}
+						nothingFoundMessage={
+							crewLoading ? 'Loading…' : 'No crew members found'
+						}
+						disabled={saving}
+					/>
+					{taskTypeUsesEquipment(form.taskType) ? (
+						<MultiSelect
+							size={inputSize}
+							label='Equipment'
+							data={[...EQUIPMENT_OPTIONS]}
+							value={form.equipment}
+							onChange={(v) => update('equipment', v)}
+							placeholder={
+								form.equipment.length === 0 ? 'None' : undefined
+							}
+							leftSection={<HardHat size={16} />}
+							comboboxProps={{ shadow: 'xl' }}
+							maxDropdownHeight={400}
+							styles={{
+								dropdown: {
+									backgroundColor: 'var(--mantine-color-gray-2)',
+									border: '1px solid var(--mantine-primary-color-filled)',
+								},
+								option: {
+									borderRadius: 4,
+								},
+							}}
+							searchable
+							clearable
+							hidePickedOptions
+							nothingFoundMessage='No equipment found'
+							disabled={saving}
+						/>
+					) : null}
+				</SimpleGrid>
 				<br />
 				<SimpleGrid cols={{ base: 1, sm: 2 }} spacing={6}>
 					<NumberInput
@@ -876,24 +988,27 @@ export function NewTaskModal({
 					/>
 				</SimpleGrid>
 
-				<SimpleGrid cols={{ base: 1, sm: 2 }} spacing={6}>
-					<Select
-						size={inputSize}
-						label='Can start early?'
-						data={YES_NO_OPTIONS}
-						value={form.canStartEarly}
-						onChange={(v) => update('canStartEarly', v ?? 'false')}
-						allowDeselect={false}
+				<SimpleGrid cols={{ base: 1, sm: 3 }} spacing={6}>
+					<Switch
+						label='Can start early'
+						checked={form.canStartEarly}
+						onChange={(e) => update('canStartEarly', e.currentTarget.checked)}
 						disabled={saving}
+						styles={switchAlignStyles}
 					/>
-					<Select
-						size={inputSize}
-						label='Time specific?'
-						data={YES_NO_OPTIONS}
-						value={form.isTimeSpecific}
-						onChange={(v) => update('isTimeSpecific', v ?? 'false')}
-						allowDeselect={false}
+					<Switch
+						label='Time specific'
+						checked={form.isTimeSpecific}
+						onChange={(e) => update('isTimeSpecific', e.currentTarget.checked)}
 						disabled={saving}
+						styles={switchAlignStyles}
+					/>
+					<Switch
+						label='Urgent'
+						checked={form.isUrgent}
+						onChange={(e) => update('isUrgent', e.currentTarget.checked)}
+						disabled={saving}
+						styles={switchAlignStyles}
 					/>
 				</SimpleGrid>
 				<br />

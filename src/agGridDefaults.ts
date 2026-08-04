@@ -43,6 +43,7 @@ const emptyDash = <T>(p: ValueFormatterParams<T, string | null>) => {
 export type TaskColumnField = keyof Pick<
 	Task,
 	| 'externalKey'
+	| 'jobTitle'
 	| 'taskType'
 	| 'destinationAddress'
 	| 'windowStartAt'
@@ -64,6 +65,7 @@ export const REQUIRED_TASK_COLUMNS: TaskColumnField[] = ['externalKey'];
 
 export const TASK_COLUMN_OPTIONS: TaskColumnOption[] = [
 	{ field: 'externalKey', headerName: 'Job', required: true },
+	{ field: 'jobTitle', headerName: 'Title' },
 	{ field: 'taskType', headerName: 'Type' },
 	{ field: 'destinationAddress', headerName: 'Destination' },
 	{ field: 'windowStartAt', headerName: 'Start' },
@@ -77,6 +79,7 @@ export const TASK_COLUMN_OPTIONS: TaskColumnOption[] = [
 
 export const DEFAULT_VISIBLE_TASK_COLUMNS: TaskColumnField[] = [
 	'externalKey',
+	'jobTitle',
 	'taskType',
 	'destinationAddress',
 	'windowStartAt',
@@ -139,6 +142,13 @@ const taskColumnDefsBase: ColDef<Task>[] = [
 		minWidth: 72,
 		flex: 0.5,
 		suppressSizeToFit: true,
+	},
+	{
+		field: 'jobTitle',
+		headerName: 'Title',
+		valueFormatter: emptyDash,
+		minWidth: 140,
+		flex: 1.4,
 	},
 	{
 		field: 'taskType',

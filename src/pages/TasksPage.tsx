@@ -103,19 +103,14 @@ type StatusTabDef = {
 };
 
 function statusTabsForMode(mode: 'all' | 'mine' | 'delivery'): StatusTabDef[] {
-	return mode === 'delivery'
-		? [...DELIVERY_STATUS_TABS]
-		: [...STATUS_TABS];
+	return mode === 'delivery' ? [...DELIVERY_STATUS_TABS] : [...STATUS_TABS];
 }
 
 function defaultStatusTab(mode: 'all' | 'mine' | 'delivery'): StatusTabValue {
 	return mode === 'delivery' ? 'loaded' : 'in_progress';
 }
 
-function matchesStatusTab(
-	status: TaskStatus,
-	tab: StatusTabDef,
-): boolean {
+function matchesStatusTab(status: TaskStatus, tab: StatusTabDef): boolean {
 	return tab.statuses.includes(status);
 }
 
@@ -167,6 +162,7 @@ function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
 		pocContactId: contactIds[0] ?? null,
 		taskType: task.taskType,
 		externalKey: task.externalKey,
+		jobTitle: task.jobTitle ?? '',
 		taskDesc: task.description,
 		destinationAddressId: task.destinationAddressId,
 		destinationAddressName: task.destinationAddressName,
@@ -178,8 +174,10 @@ function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
 		crewMemberIds: task.crewMembers.map((m) => m.id),
 		guys: task.crewSize ?? '',
 		hours: task.estimatedHours ?? '',
-		canStartEarly: task.canStartEarly ? 'true' : 'false',
-		isTimeSpecific: task.isTimeSpecific ? 'true' : 'false',
+		canStartEarly: task.canStartEarly,
+		isTimeSpecific: task.isTimeSpecific,
+		isUrgent: task.isUrgent,
+		equipment: task.equipment ?? [],
 	};
 }
 
@@ -275,6 +273,11 @@ export function TasksPage({
 		});
 	};
 
+	const showStatusTabs = !isMobile;
+	const useCardView = mode === 'mine' && Boolean(isMobile);
+	/** Mobile My Tasks uses day chips instead of All / Today / Tomorrow. */
+	const showDayFilter = !useCardView;
+
 	const taskDayKeys = useMemo(() => {
 		if (mode !== 'mine') return [] as string[];
 		const keys = new Set<string>();
@@ -286,26 +289,25 @@ export function TasksPage({
 		return [...keys].sort();
 	}, [tasks, mode, dayFromQuery]);
 
+	/** Resolve day on render so cards never flash every day before useEffect runs. */
+	const activeDayKey = useMemo(() => {
+		if (!useCardView || taskDayKeys.length === 0) return null;
+		if (dayFromQuery && taskDayKeys.includes(dayFromQuery)) return dayFromQuery;
+		if (selectedDayKey && taskDayKeys.includes(selectedDayKey)) {
+			return selectedDayKey;
+		}
+		const todayKey = localDayKey(new Date());
+		if (taskDayKeys.includes(todayKey)) return todayKey;
+		return taskDayKeys[0] ?? null;
+	}, [useCardView, taskDayKeys, dayFromQuery, selectedDayKey]);
+
 	useEffect(() => {
 		if (mode !== 'mine' || taskDayKeys.length === 0) {
 			setSelectedDayKey(null);
 			return;
 		}
-		setSelectedDayKey((prev) => {
-			if (dayFromQuery && taskDayKeys.includes(dayFromQuery)) {
-				return dayFromQuery;
-			}
-			if (prev && taskDayKeys.includes(prev)) return prev;
-			const todayKey = localDayKey(new Date());
-			if (taskDayKeys.includes(todayKey)) return todayKey;
-			return taskDayKeys[0] ?? null;
-		});
-	}, [mode, taskDayKeys, dayFromQuery]);
-
-	const showStatusTabs = !isMobile;
-	const useCardView = mode === 'mine' && Boolean(isMobile);
-	/** Mobile My Tasks uses day chips instead of All / Today / Tomorrow. */
-	const showDayFilter = !useCardView;
+		setSelectedDayKey(activeDayKey);
+	}, [mode, taskDayKeys, activeDayKey]);
 
 	/** Cancelled tab only on desktop All Tasks / Delivery — not member lists. */
 	const visibleStatusTabs = useMemo(() => {
@@ -344,8 +346,8 @@ export function TasksPage({
 		if (mode === 'mine') {
 			next = next.filter((task) => task.status !== 'Cancelled');
 		}
-		if (useCardView && selectedDayKey) {
-			const day = parseDayKey(selectedDayKey);
+		if (useCardView && activeDayKey) {
+			const day = parseDayKey(activeDayKey);
 			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
 		} else if (dayFilter === 'today' || dayFilter === 'tomorrow') {
 			const day = new Date();
@@ -353,7 +355,7 @@ export function TasksPage({
 			next = next.filter((task) => isSameLocalDay(task.windowStartAt, day));
 		}
 		return next;
-	}, [tasks, mode, useCardView, selectedDayKey, dayFilter]);
+	}, [tasks, mode, useCardView, activeDayKey, dayFilter]);
 
 	const statusTabCounts = useMemo(() => {
 		const counts = {} as Record<StatusTabValue, number>;
@@ -400,6 +402,9 @@ export function TasksPage({
 	}, [scopedTasks, showStatusTabs, statusTab, visibleStatusTabs, mode]);
 
 	const crewMemberId = mode === 'mine' ? (user?.id ?? null) : null;
+	/** Desktop My Tasks: also include tasks the user created. Mobile stays assigned-only. */
+	const createdByUserId =
+		mode === 'mine' && !isMobile ? (user?.id ?? null) : null;
 
 	const refreshTasks = useCallback(
 		async (signal?: AbortSignal) => {
@@ -414,6 +419,7 @@ export function TasksPage({
 			try {
 				const next = await listTasks(signal, {
 					crewMemberId: crewMemberId ?? undefined,
+					createdByUserId: createdByUserId ?? undefined,
 				});
 				if (!signal?.aborted) setTasks(next);
 			} catch (err: unknown) {
@@ -423,10 +429,15 @@ export function TasksPage({
 				if (!signal?.aborted) setLoading(false);
 			}
 		},
-		[mode, crewMemberId],
+		[mode, crewMemberId, createdByUserId],
 	);
 
 	useEffect(() => {
+		// TasksPage is reused across /tasks ↔ /my-tasks (same component type).
+		// Drop prior rows immediately so All Tasks never flash inside My Tasks.
+		setTasks([]);
+		setLoading(true);
+		setError(null);
 		const controller = new AbortController();
 		void refreshTasks(controller.signal);
 		return () => controller.abort();
@@ -612,7 +623,7 @@ export function TasksPage({
 				</div>
 			) : null}
 
-			{useCardView && taskDayKeys.length > 0 ? (
+					{useCardView && taskDayKeys.length > 0 ? (
 				<div
 					className='tasks-day-chips'
 					role='tablist'
@@ -620,7 +631,7 @@ export function TasksPage({
 				>
 					{taskDayKeys.map((key) => {
 						const day = parseDayKey(key);
-						const selected = key === selectedDayKey;
+						const selected = key === activeDayKey;
 						return (
 							<button
 								key={key}

@@ -21,6 +21,7 @@ export interface Task {
   taskType: TaskType;
   status: TaskStatus;
   externalKey: string;
+  jobTitle: string;
   contactNames: string;
   destinationAddressName: string;
   destinationStreet: string;
@@ -32,6 +33,9 @@ export interface Task {
   description: string;
   createdByName: string;
   cancelledAt: string | null;
+  publicToken?: string;
+  publicTrackingPath?: string;
+  publicTrackingUrl?: string;
 }
 
 export interface TaskCrewMember {
@@ -80,6 +84,7 @@ export interface TaskDetail {
   taskType: TaskType;
   status: TaskStatus;
   description: string;
+  jobTitle: string;
   externalKey: string;
   destinationAddressId: number | null;
   destinationAddressName: string;
@@ -91,12 +96,17 @@ export interface TaskDetail {
   estimatedHours: number | null;
   isTimeSpecific: boolean;
   canStartEarly: boolean;
+  isUrgent: boolean;
+  equipment: string[];
   windowStartAt: string | null;
   windowEndAt: string | null;
   completedNotes: string | null;
   completedAt: string | null;
   failedReason: string | null;
   cancelledAt: string | null;
+  publicToken?: string;
+  publicTrackingPath?: string;
+  publicTrackingUrl?: string;
   completionNotes: TaskCompletionNote[];
   completionNotesByName: string | null;
   createdAt: string;

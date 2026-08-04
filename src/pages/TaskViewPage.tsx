@@ -76,7 +76,11 @@ function ContactBlock({ contact }: { contact: TaskContact }) {
 				{contact.title.trim() ? (
 					<div className='task-view-contact-title'>{contact.title.trim()}</div>
 				) : null}
-				{contact.email ? (
+				{phone ? (
+					<a className='task-view-contact-email' href={`tel:${phone}`}>
+						{phone}
+					</a>
+				) : contact.email ? (
 					<a
 						className='task-view-contact-email'
 						href={`mailto:${contact.email}`}
@@ -408,24 +412,82 @@ function TaskViewBody({
 				</Alert>
 			) : null}
 
-			<p className='task-view-address'>{address || 'No address'}</p>
-			{destinationName ? (
-				<p className='task-view-destination-name'>{destinationName}</p>
+			<div className='task-view-section'>
+				{task.jobTitle?.trim() ? (
+					<p className='task-view-job-title'>{task.jobTitle.trim()}</p>
+				) : null}
+				<p className='task-view-address'>{address || 'No address'}</p>
+				{destinationName ? (
+					<p className='task-view-destination-name'>{destinationName}</p>
+				) : null}
+
+				<p className='task-view-window'>
+					{formatWindow(task.windowStartAt, task.windowEndAt)}
+				</p>
+			</div>
+
+			<div className='task-view-section'>
+				<div className='task-view-meta'>
+					<div className='task-view-field'>
+						<span className='task-view-field-label'>Status</span>
+						<TaskStatusBadge status={task.status} />
+					</div>
+					<Field
+						label='Created by'
+						value={
+							task.createdByName ? formatShortName(task.createdByName) : ''
+						}
+					/>
+					<Field
+						label='Guys'
+						value={task.crewSize != null ? String(task.crewSize) : ''}
+					/>
+					<Field
+						label='Hours'
+						value={
+							task.estimatedHours != null ? String(task.estimatedHours) : ''
+						}
+					/>
+					<Field
+						label='Can start early'
+						value={task.canStartEarly ? 'Yes' : 'No'}
+					/>
+					<Field
+						label='Time specific'
+						value={task.isTimeSpecific ? 'Yes' : 'No'}
+					/>
+					<Field label='Urgent' value={task.isUrgent ? 'Yes' : 'No'} />
+					<Field
+						label='Equipment'
+						value={
+							task.equipment.length > 0 ? task.equipment.join(' · ') : ''
+						}
+					/>
+				</div>
+			</div>
+
+			{!isEmptyTaskDesc(task.description) ? (
+				<div className='task-view-section'>
+					<TaskDescHtml
+						value={task.description}
+						className='task-view-description'
+					/>
+				</div>
 			) : null}
 
-			<p className='task-view-window'>
-				{formatWindow(task.windowStartAt, task.windowEndAt)}
-			</p>
-
-			<div className='task-view-row'>
+			<div className='task-view-section'>
 				<div className='task-view-field'>
-					<span className='task-view-field-label'>Status</span>
-					<TaskStatusBadge status={task.status} />
+					<span className='task-view-field-label'>Contacts</span>
+					{task.contacts.length === 0 ? (
+						<span className='task-view-field-value'>None</span>
+					) : (
+						<div className='task-view-contacts'>
+							{task.contacts.map((contact) => (
+								<ContactBlock key={contact.id} contact={contact} />
+							))}
+						</div>
+					)}
 				</div>
-				<Field
-					label='Created by'
-					value={task.createdByName ? formatShortName(task.createdByName) : ''}
-				/>
 			</div>
 
 			<TaskStartedCrew
@@ -433,109 +495,84 @@ function TaskViewBody({
 				crewMembers={task.crewMembers}
 			/>
 
-			<div className='task-view-field'>
-				<span className='task-view-field-label'>Contacts</span>
-				{task.contacts.length === 0 ? (
-					<span className='task-view-field-value'>None</span>
-				) : (
-					<div className='task-view-contacts'>
-						{task.contacts.map((contact) => (
-							<ContactBlock key={contact.id} contact={contact} />
-						))}
-					</div>
-				)}
-			</div>
-
-			<Field
-				label='Crew'
-				value={
-					task.crewMembers.length
-						? task.crewMembers
-								.map((m) => formatShortName(m.displayName))
-								.join(', ')
-						: 'Unassigned'
-				}
-			/>
-
-			{task.crewSize != null || task.estimatedHours != null ? (
-				<div className='task-view-row'>
-					{task.crewSize != null ? (
-						<Field label='Guys' value={String(task.crewSize)} />
-					) : null}
-					{task.estimatedHours != null ? (
-						<Field label='Hours' value={String(task.estimatedHours)} />
-					) : null}
-				</div>
-			) : null}
-
-			<div className='task-view-row'>
+			<div className='task-view-section'>
 				<Field
-					label='Can start early'
-					value={task.canStartEarly ? 'Yes' : 'No'}
-				/>
-				<Field
-					label='Time specific'
-					value={task.isTimeSpecific ? 'Yes' : 'No'}
+					label='Crew'
+					value={
+						task.crewMembers.length
+							? task.crewMembers
+									.map((m) => formatShortName(m.displayName))
+									.join(', ')
+							: 'Unassigned'
+					}
 				/>
 			</div>
 
 			{(task.completionNotes?.length ?? 0) > 0 ? (
-				task.completionNotes.map((entry) => {
-					const at = entry.updatedAt || entry.createdAt;
-					const d = at ? new Date(at) : null;
-					const when =
-						d && !Number.isNaN(d.getTime())
-							? d.toLocaleString(undefined, {
-									year: 'numeric',
-									month: 'short',
-									day: 'numeric',
-									hour: 'numeric',
-									minute: '2-digit',
-								})
-							: '—';
-					const label = entry.outcome === 'Failed' ? 'Failed' : 'Completed';
-					const who = formatShortName(entry.displayName);
-					return (
-						<div key={entry.userId} className='task-view-field'>
-							<span className='task-view-field-label'>
-								{entry.outcome === 'Failed'
-									? 'Failed reason'
-									: 'Completed notes'}
-							</span>
-							<span className='task-view-field-value'>
-								{entry.notes?.trim() || '—'}
-							</span>
-							<span className='task-view-completion-meta'>
-								{label} at {when} by {who}
-							</span>
-						</div>
-					);
-				})
+				<div className='task-view-section'>
+					{task.completionNotes.map((entry) => {
+						const at = entry.updatedAt || entry.createdAt;
+						const d = at ? new Date(at) : null;
+						const when =
+							d && !Number.isNaN(d.getTime())
+								? d.toLocaleString(undefined, {
+										year: 'numeric',
+										month: 'short',
+										day: 'numeric',
+										hour: 'numeric',
+										minute: '2-digit',
+									})
+								: '—';
+						const label = entry.outcome === 'Failed' ? 'Failed' : 'Completed';
+						const who = formatShortName(entry.displayName);
+						return (
+							<div key={entry.userId} className='task-view-field'>
+								<span className='task-view-field-label'>
+									{entry.outcome === 'Failed'
+										? 'Failed reason'
+										: 'Completed notes'}
+								</span>
+								<span className='task-view-field-value'>
+									{entry.notes?.trim() || '—'}
+								</span>
+								<span className='task-view-completion-meta'>
+									{label} at {when} by {who}
+								</span>
+							</div>
+						);
+					})}
+				</div>
 			) : task.status === 'Failed' ? (
-				<Field label='Failed reason' value={task.failedReason ?? ''} />
+				<div className='task-view-section'>
+					<Field label='Failed reason' value={task.failedReason ?? ''} />
+				</div>
 			) : task.status === 'Completed' || task.completedNotes ? (
-				<Field label='Completed notes' value={task.completedNotes ?? ''} />
+				<div className='task-view-section'>
+					<Field
+						label='Completed notes'
+						value={task.completedNotes ?? ''}
+					/>
+				</div>
 			) : task.failedReason ? (
-				<Field label='Failed reason' value={task.failedReason} />
+				<div className='task-view-section'>
+					<Field label='Failed reason' value={task.failedReason} />
+				</div>
 			) : null}
 
-			{!isEmptyTaskDesc(task.description) ? (
-				<TaskDescHtml
-					value={task.description}
-					className='task-view-description'
+			<div className='task-view-section'>
+				<TaskAttachments
+					taskId={task.id}
+					initialAttachments={task.attachments}
+					variant='plain'
 				/>
-			) : null}
+			</div>
 
-			<TaskAttachments
-				taskId={task.id}
-				initialAttachments={task.attachments}
-				variant='plain'
-			/>
-
-			<TaskHistory
-				taskId={task.id}
-				refreshKey={`${task.status}:${task.updatedAt}`}
-			/>
+			<div className='task-view-section'>
+				<TaskHistory
+					taskId={task.id}
+					refreshKey={`${task.status}:${task.updatedAt}`}
+				/>
+			</div>
 		</div>
 	);
 }

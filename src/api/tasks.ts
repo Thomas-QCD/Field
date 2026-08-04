@@ -9,10 +9,13 @@ import { apiFetch, expectJsonField, expectOk, readJson } from './client';
 
 export async function listTasks(
 	signal?: AbortSignal,
-	opts?: { crewMemberId?: string | null },
+	opts?: { crewMemberId?: string | null; createdByUserId?: string | null },
 ): Promise<Task[]> {
 	const params = new URLSearchParams();
 	if (opts?.crewMemberId) params.set('crewMemberId', opts.crewMemberId);
+	if (opts?.createdByUserId) {
+		params.set('createdByUserId', opts.createdByUserId);
+	}
 	const qs = params.toString();
 	const res = await apiFetch(`/api/tasks${qs ? `?${qs}` : ''}`, { signal });
 	const data = await expectOk<{ tasks?: Task[] }>(res, 'List tasks failed');
@@ -51,6 +54,8 @@ export interface TaskHistoryEvent {
 	latitude: number | null;
 	longitude: number | null;
 	accuracyMeters: number | null;
+	/** Set when multiple same-kind attachments were folded into one row. */
+	count?: number | null;
 }
 
 export async function getTaskHistory(
@@ -71,6 +76,7 @@ export interface CreateTaskInput {
 	pocContactId: number | null;
 	taskType: TaskType;
 	externalKey: string;
+	jobTitle: string;
 	taskDesc: string;
 	destinationAddressId: number | null;
 	destinationAddressName: string;
@@ -82,8 +88,10 @@ export interface CreateTaskInput {
 	crewMemberIds: string[];
 	guys: number | string;
 	hours: number | string;
-	canStartEarly: string;
-	isTimeSpecific: string;
+	canStartEarly: boolean;
+	isTimeSpecific: boolean;
+	isUrgent: boolean;
+	equipment: string[];
 }
 
 export interface CreatedTask {

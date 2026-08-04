@@ -20,6 +20,7 @@ export function isEntraAuthEnabled() {
 export function isAuthExemptPath(pathname) {
   if (pathname === "/api/health") return true;
   if (pathname === "/api/mobile/activate") return true;
+  if (pathname.startsWith("/api/public/")) return true;
   return false;
 }
 

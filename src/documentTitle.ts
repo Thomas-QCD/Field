@@ -20,6 +20,7 @@ function pageTitleForPath(pathname: string): string {
 	const exact = EXACT_TITLES[pathname];
 	if (exact) return exact;
 
+	if (/^\/t\/[^/]+\/?$/.test(pathname)) return 'Order tracking';
 	if (/^\/task\/[^/]+\/complete\/?$/.test(pathname)) return 'Complete Task';
 	if (/^\/task\/[^/]+\/deliver\/?$/.test(pathname)) return 'Deliver Task';
 	if (/^\/task\/[^/]+\/?$/.test(pathname)) return 'Task';

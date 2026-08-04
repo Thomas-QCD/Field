@@ -67,6 +67,9 @@ function TaskCard({
 				</header>
 
 				<div className='task-card-meta'>
+					{task.jobTitle?.trim() ? (
+						<p className='task-card-job-title'>{task.jobTitle.trim()}</p>
+					) : null}
 					<CardRow label='Location' value={task.destinationAddress} />
 					<CardRow
 						label='Window'

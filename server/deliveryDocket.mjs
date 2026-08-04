@@ -16,9 +16,9 @@ const LABEL_WIDTH = 110;
 const MARGIN = 50;
 const PAGE_WIDTH = 612; // US Letter
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-const LOGO_PATH = path.join(root, "public", "logoColor.png");
+const LOGO_PATH = path.join(root, "public", "logo-qcd.png");
 const LOGO_HEIGHT = 42;
-const LOGO_WIDTH = LOGO_HEIGHT; // square brand mark (public/logoColor.png)
+const LOGO_WIDTH = LOGO_HEIGHT * (399 / 158); // QCD wordmark (public/logo-qcd.png)
 const DOCUMENTS_DIR = path.join(root, "storage", "documents");
 const KIND = "delivery_docket";
 

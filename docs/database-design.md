@@ -249,7 +249,8 @@ Central table. Contacts and crew are junction tables; destination is an optional
 | `id` | `bigint` | PK | `Id` |
 | `task_type` | `task_type` | enum, NOT NULL | `TaskType` |
 | `status` | `task_status` | enum, NOT NULL | `Status` |
-| `description` | `text` | nullable | `TaskDesc` |
+| `description` | `text` | nullable | `TaskDesc` (crew instructions; job title is separate) |
+| `job_title` | `varchar(255)` | nullable | Short job title (`jobTitle`) — formerly embedded in `TaskDesc` |
 | `external_key` | `varchar(100)` | nullable, indexed | `ExternalKey` |
 | `created_by_user_id` | `uuid` | FK → `users.id`, NOT NULL | `TaskCreatedBy` (resolved to user) |
 | `destination_address_id` | `bigint` | FK → `addresses.id`, nullable | `Destination*` (0..1) |
@@ -257,6 +258,8 @@ Central table. Contacts and crew are junction tables; destination is an optional
 | `estimated_hours` | `numeric(5,2)` | nullable | `Hours` |
 | `is_time_specific` | `boolean` | NOT NULL DEFAULT false | `IsTimeSpecific` |
 | `can_start_early` | `boolean` | NOT NULL DEFAULT false | `CanInstallEarly` (Field: can start early — all task types) |
+| `is_urgent` | `boolean` | NOT NULL DEFAULT false | Informational urgent flag (`isUrgent`); no workflow side effects |
+| `equipment` | `text[]` | NOT NULL DEFAULT `{}` | Equipment list (`equipment[]`) for Install / Removal / Site Survey — e.g. `Lift`, `Ladder`; empty = none; 0..many |
 | `window_start_at` | `timestamptz` | nullable | `AfterDateTime` |
 | `window_end_at` | `timestamptz` | nullable | `BeforeDateTime` |
 | `completed_notes` | `text` | nullable | `CompletedNotes` |
@@ -265,6 +268,7 @@ Central table. Contacts and crew are junction tables; destination is an optional
 | `cancelled_at` | `timestamptz` | nullable | Set when status becomes `Cancelled`; used for 7-day purge |
 | `status_before_cancel` | `task_status` | nullable | Prior status at cancel time (audit); restore always sets `Undetermined` |
 | `deleted_at` | `timestamptz` | nullable | Soft delete — null = active |
+| `public_token` | `varchar(43)` | NOT NULL, UNIQUE | Unguessable customer tracking token — public page `/t/:token` |
 | `created_at` | `timestamptz` | NOT NULL | `CreatedDateTime` |
 | `updated_at` | `timestamptz` | NOT NULL | `ModifiedDateTime` |
 
@@ -279,14 +283,17 @@ Central table. Contacts and crew are junction tables; destination is an optional
 - `(status, window_start_at, window_end_at)` — task board / scheduling
 - `(destination_address_id)`
 - `(external_key)` where not null
+- `(public_token)` UNIQUE — customer tracking lookup
 - `(created_at DESC)`
 - `(cancelled_at)` where `status = Cancelled` and `deleted_at IS NULL` — purge window
+
+**Public tracking:** Each task has a `public_token`. Unauthenticated `GET /api/public/tasks/:token` returns a customer-safe summary + history; `GET /api/public/tasks/:token/documents/:kind` serves `delivery_docket` / `pod` PDFs. SPA route: `/t/:token`.
 
 **Crew assignment:** 0..many via `task_crew_members` (API/form: `crewMemberIds: string[]`).
 
 **Contact assignment:** 0..many via `task_contacts` (API/form: `contactIds: number[]`). One POC per task (`is_poc` / `pocContactId`); defaults to the first contact in `contactIds`.
 
-**Destination:** 0..1 via `destinationAddressId` (pick existing venue by `address_name`), or create a new `addresses` row from `destinationAddressName` + street/building/notes.
+**Destination:** 0..1 via `destinationAddressId` (pick existing venue, or create via Addresses / New address). Task create/update does not auto-insert `addresses` from freeform destination fields.
 
 **Assignment rule (draft):** `Assigned` status should require at least one `task_crew_members` row. Enforce in service layer.
 
@@ -432,7 +439,7 @@ Append-only audit log for status transitions and restore events. The History UI 
 | `Id` | `tasks.id` |
 | `TaskType` | `tasks.task_type` (enum) |
 | `Status` | `tasks.status` (enum) |
-| `TaskDesc` | `tasks.description` |
+| `TaskDesc` | `tasks.description` (instructions); short title → `tasks.job_title` |
 | `ExternalKey` | `tasks.external_key` |
 | `AssignedToDriverUserId` | `task_crew_members.user_id` → `users` (one of many) |
 | `DriverName` | `users.display_name` (join via `task_crew_members`) |
@@ -465,6 +472,7 @@ interface TaskReadModel {
   taskType: string;
   status: string;
   description: string | null;
+  jobTitle: string | null;
   externalKey: string | null;
   crewMemberIds: string[];
   assignedCrew: { id: string; displayName: string }[];
@@ -486,6 +494,9 @@ interface TaskReadModel {
   completedNotes: string | null;
   completedAt: string | null;
   failedReason: string | null;
+  publicToken: string;
+  publicTrackingPath: string;
+  publicTrackingUrl: string;
   attachments: TaskAttachmentDto[];
   documents: TaskDocumentDto[]; // shipping_label | delivery_docket | pod
   createdBy: { id: string; displayName: string };
