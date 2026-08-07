@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
@@ -97,6 +98,23 @@ export async function presignGet({
 }
 
 /**
+ * Download an S3 object for server-side processing.
+ * @param {string} storageKey
+ */
+export async function getObjectBuffer(storageKey) {
+  const result = await getClient().send(
+    new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: storageKey,
+    }),
+  );
+  if (!result.Body) {
+    throw new Error(`S3 object has no body: ${storageKey}`);
+  }
+  return Buffer.from(await result.Body.transformToByteArray());
+}
+
+/**
  * @param {string} storageKey
  */
 export async function deleteObject(storageKey) {
@@ -104,6 +122,26 @@ export async function deleteObject(storageKey) {
     new DeleteObjectCommand({
       Bucket: BUCKET,
       Key: storageKey,
+    }),
+  );
+}
+
+/**
+ * Server-side copy within the attachments bucket (e.g. task clone).
+ *
+ * @param {string} sourceKey
+ * @param {string} destKey
+ */
+export async function copyObject(sourceKey, destKey) {
+  const encodedSourceKey = sourceKey
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  await getClient().send(
+    new CopyObjectCommand({
+      Bucket: BUCKET,
+      CopySource: `${BUCKET}/${encodedSourceKey}`,
+      Key: destKey,
     }),
   );
 }

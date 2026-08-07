@@ -98,7 +98,7 @@ function pt(local) {
  *   updatedAt: string,
  *   deletedAt?: string | null,
  *   crew?: string[],
- *   contacts?: { id: number, isPoc?: boolean }[],
+ *   contacts?: { id: number, isPoc?: boolean, receivesEmail?: boolean }[],
  *   crewEvents?: { userId: string, type: 'started'|'ended', at: string, lat?: number, lng?: number }[],
  *   completionNotes?: { userId: string, outcome: 'Completed'|'Failed', notes?: string | null }[],
  *   attachments?: { kind: string, storageKey: string, mimeType: string, fileName: string, caption?: string | null, uploadedBy: string, at: string }[],
@@ -1360,18 +1360,23 @@ async function insertTask(client, t) {
     ],
   );
 
-  for (const userId of t.crew ?? []) {
+  for (const [index, userId] of (t.crew ?? []).entries()) {
     await client.query(
-      `INSERT INTO task_crew_members (task_id, user_id) VALUES ($1, $2::uuid)`,
-      [t.id, userId],
+      `INSERT INTO task_crew_members (task_id, user_id, is_lead) VALUES ($1, $2::uuid, $3)`,
+      [t.id, userId, index === 0],
     );
   }
 
   for (const c of t.contacts ?? []) {
     await client.query(
-      `INSERT INTO task_contacts (task_id, contact_id, is_poc)
-       VALUES ($1, $2, $3)`,
-      [t.id, c.id, Boolean(c.isPoc)],
+      `INSERT INTO task_contacts (task_id, contact_id, is_poc, receives_email)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        t.id,
+        c.id,
+        Boolean(c.isPoc),
+        c.receivesEmail != null ? Boolean(c.receivesEmail) : Boolean(c.isPoc),
+      ],
     );
   }
 

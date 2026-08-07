@@ -1,6 +1,7 @@
 import { getPool } from "./db.mjs";
 import { recordTaskHistoryEvent } from "./taskHistory.mjs";
 import { generatePublicToken } from "./publicToken.mjs";
+import { maybeSendTerminalEmails } from "./taskCompletionEmails.mjs";
 import { parseEquipment } from "../shared/equipment.js";
 import {
   DELIVERY_STATUS_TRANSITIONS,
@@ -101,7 +102,7 @@ async function upsertCompletionNote(client, taskId, userId, outcome, notes) {
 }
 
 /**
- * Rebuild tasks.completed_notes / failed_reason from per-user rows (legacy/PDF).
+ * Rebuild tasks.completed_notes / failed_reason from per-user rows (PDF / API rollup).
  * @param {import('pg').PoolClient} client
  * @param {number} taskId
  */
@@ -120,8 +121,8 @@ async function refreshTaskNoteAggregates(client, taskId) {
   /** @type {string[]} */
   const failedParts = [];
   for (const row of rows) {
-    const text = asString(row.notes);
-    if (!text) continue;
+    const text = row.notes == null ? "" : String(row.notes);
+    if (text.length === 0) continue;
     const line = `${row.display_name}: ${text}`;
     if (row.outcome === "Failed") failedParts.push(line);
     else completedParts.push(line);
@@ -187,14 +188,14 @@ async function listCompletionNotes(db, taskId) {
  * @param {unknown} value
  * @returns {number[]}
  */
-function asIdList(value) {
+function asIdList(value, fieldName = "contactIds") {
   if (!Array.isArray(value)) return [];
   const ids = [];
   for (const raw of value) {
     const n = typeof raw === "number" ? raw : Number(raw);
     if (!Number.isInteger(n) || n < 1) {
       throw Object.assign(
-        new Error("contactIds must be positive integers"),
+        new Error(`${fieldName} must be positive integers`),
         { status: 400 },
       );
     }
@@ -230,6 +231,65 @@ function resolvePocContactId(contactIds, rawPocContactId) {
   }
 
   return contactIds[0];
+}
+
+/**
+ * Resolve the task lead crew member: explicit leadCrewMemberId if on the task,
+ * else first crew member. Remaining assigned crew are sub.
+ * @param {string[]} crewMemberIds
+ * @param {unknown} rawLeadCrewMemberId
+ * @returns {string | null}
+ */
+function resolveLeadCrewMemberId(crewMemberIds, rawLeadCrewMemberId) {
+  if (crewMemberIds.length === 0) return null;
+
+  if (rawLeadCrewMemberId != null && rawLeadCrewMemberId !== "") {
+    const id = asString(rawLeadCrewMemberId);
+    if (!id) {
+      throw Object.assign(
+        new Error("leadCrewMemberId must be a non-empty string"),
+        { status: 400 },
+      );
+    }
+    if (!crewMemberIds.includes(id)) {
+      throw Object.assign(
+        new Error("leadCrewMemberId must be one of crewMemberIds"),
+        { status: 400 },
+      );
+    }
+    return id;
+  }
+
+  return crewMemberIds[0];
+}
+
+/**
+ * Contacts that receive automated task emails.
+ * If omitted, POC receives email and others do not.
+ * @param {number[]} contactIds
+ * @param {number | null} pocContactId
+ * @param {unknown} rawReceiveEmailContactIds
+ * @returns {Set<number>}
+ */
+function resolveReceiveEmailContactIds(
+  contactIds,
+  pocContactId,
+  rawReceiveEmailContactIds,
+) {
+  if (rawReceiveEmailContactIds === undefined) {
+    return new Set(pocContactId != null ? [pocContactId] : []);
+  }
+  const ids = asIdList(rawReceiveEmailContactIds, "receiveEmailContactIds");
+  const allowed = new Set(contactIds);
+  for (const id of ids) {
+    if (!allowed.has(id)) {
+      throw Object.assign(
+        new Error("receiveEmailContactIds must be a subset of contactIds"),
+        { status: 400 },
+      );
+    }
+  }
+  return new Set(ids);
 }
 
 /**
@@ -282,6 +342,11 @@ export async function createTask(body) {
 
   const contactIds = asIdList(body.contactIds);
   const pocContactId = resolvePocContactId(contactIds, body.pocContactId);
+  const receiveEmailContactIds = resolveReceiveEmailContactIds(
+    contactIds,
+    pocContactId,
+    body.receiveEmailContactIds,
+  );
 
   const windowStartAt = asOptionalDateTime(body.afterDateTime);
   const windowEndAt = asOptionalDateTime(body.beforeDateTime);
@@ -306,6 +371,10 @@ export async function createTask(body) {
   const crewMemberIds = Array.isArray(body.crewMemberIds)
     ? [...new Set(body.crewMemberIds.map((id) => asString(id)).filter(Boolean))]
     : [];
+  const leadCrewMemberId = resolveLeadCrewMemberId(
+    crewMemberIds,
+    body.leadCrewMemberId,
+  );
 
   const status = crewMemberIds.length > 0 ? "Assigned" : "Unassigned";
 
@@ -432,16 +501,21 @@ export async function createTask(body) {
 
     for (const contactId of contactIds) {
       await client.query(
-        `INSERT INTO task_contacts (task_id, contact_id, is_poc)
-         VALUES ($1, $2, $3)`,
-        [taskId, contactId, contactId === pocContactId],
+        `INSERT INTO task_contacts (task_id, contact_id, is_poc, receives_email)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          taskId,
+          contactId,
+          contactId === pocContactId,
+          receiveEmailContactIds.has(contactId),
+        ],
       );
     }
 
     for (const userId of crewMemberIds) {
       await client.query(
-        `INSERT INTO task_crew_members (task_id, user_id) VALUES ($1, $2)`,
-        [taskId, userId],
+        `INSERT INTO task_crew_members (task_id, user_id, is_lead) VALUES ($1, $2, $3)`,
+        [taskId, userId, userId === leadCrewMemberId],
       );
     }
 
@@ -458,7 +532,9 @@ export async function createTask(body) {
       publicToken: String(taskRows[0].public_token ?? publicToken),
       contactIds,
       pocContactId,
+      receiveEmailContactIds: [...receiveEmailContactIds],
       crewMemberIds,
+      leadCrewMemberId,
     };
   } catch (err) {
     try {
@@ -520,6 +596,11 @@ export async function updateTask(taskId, body) {
 
   const contactIds = asIdList(body.contactIds);
   const pocContactId = resolvePocContactId(contactIds, body.pocContactId);
+  const receiveEmailContactIds = resolveReceiveEmailContactIds(
+    contactIds,
+    pocContactId,
+    body.receiveEmailContactIds,
+  );
 
   const windowStartAt = asOptionalDateTime(body.afterDateTime);
   const windowEndAt = asOptionalDateTime(body.beforeDateTime);
@@ -544,6 +625,10 @@ export async function updateTask(taskId, body) {
   const crewMemberIds = Array.isArray(body.crewMemberIds)
     ? [...new Set(body.crewMemberIds.map((id) => asString(id)).filter(Boolean))]
     : [];
+  const leadCrewMemberId = resolveLeadCrewMemberId(
+    crewMemberIds,
+    body.leadCrewMemberId,
+  );
 
   const pool = getPool();
   const client = await pool.connect();
@@ -651,9 +736,14 @@ export async function updateTask(taskId, body) {
     await client.query(`DELETE FROM task_contacts WHERE task_id = $1`, [taskId]);
     for (const contactId of contactIds) {
       await client.query(
-        `INSERT INTO task_contacts (task_id, contact_id, is_poc)
-         VALUES ($1, $2, $3)`,
-        [taskId, contactId, contactId === pocContactId],
+        `INSERT INTO task_contacts (task_id, contact_id, is_poc, receives_email)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          taskId,
+          contactId,
+          contactId === pocContactId,
+          receiveEmailContactIds.has(contactId),
+        ],
       );
     }
 
@@ -662,8 +752,8 @@ export async function updateTask(taskId, body) {
     ]);
     for (const userId of crewMemberIds) {
       await client.query(
-        `INSERT INTO task_crew_members (task_id, user_id) VALUES ($1, $2)`,
-        [taskId, userId],
+        `INSERT INTO task_crew_members (task_id, user_id, is_lead) VALUES ($1, $2, $3)`,
+        [taskId, userId, userId === leadCrewMemberId],
       );
     }
 
@@ -679,7 +769,9 @@ export async function updateTask(taskId, body) {
           : null,
       contactIds,
       pocContactId,
+      receiveEmailContactIds: [...receiveEmailContactIds],
       crewMemberIds,
+      leadCrewMemberId,
     };
   } catch (err) {
     try {
@@ -699,6 +791,13 @@ const TERMINAL_STATUSES = new Set([
   "Undetermined",
   "Cancelled",
 ]);
+
+/**
+ * Terminal statuses a crew member can pull back into work by starting again.
+ * Undetermined is included because it covers mixed crew outcomes and restored
+ * cancelled tasks, both of which still need work done.
+ */
+const REOPENABLE_STATUSES = new Set(["Completed", "Undetermined"]);
 
 /**
  * Force-end every crew member who has started but not ended this task.
@@ -731,7 +830,8 @@ export async function endOpenCrewStarts(client, taskId) {
 /**
  * Log a per-crew start/end event and derive task status:
  * - First Start → In Progress (Delivery → Loaded) unless already at that status / terminal
- * - Start on Completed → reopen to In Progress (Delivery → Loaded); clears that user's end + note
+ * - Start on Completed or Undetermined → reopen to In Progress (Delivery → Loaded);
+ *   clears that user's end + note
  * - All starters have Ended → Completed | Failed | Undetermined from per-user outcomes
  *
  * @param {number} taskId
@@ -797,7 +897,12 @@ export async function createCrewEvent(taskId, body) {
       );
     }
     outcome = rawOutcome === "Failed" ? "Failed" : "Completed";
-    notes = asString(body.notes);
+    notes = body.notes == null ? "" : String(body.notes);
+    if (outcome === "Failed" && notes.length === 0) {
+      throw Object.assign(new Error("Failed reason is required"), {
+        status: 400,
+      });
+    }
   }
 
   const pool = getPool();
@@ -821,10 +926,10 @@ export async function createCrewEvent(taskId, body) {
     const taskType = String(existing.rows[0].task_type);
     /** Delivery Load Items → Loaded; other types Start → In Progress. */
     const startStatus = taskType === "Delivery" ? "Loaded" : "In Progress";
-    const reopeningCompleted =
-      fromStatus === "Completed" && eventType === "started";
+    const reopening =
+      REOPENABLE_STATUSES.has(fromStatus) && eventType === "started";
 
-    if (TERMINAL_STATUSES.has(fromStatus) && !reopeningCompleted) {
+    if (TERMINAL_STATUSES.has(fromStatus) && !reopening) {
       throw Object.assign(
         new Error(`Cannot log crew event on ${fromStatus} task`),
         { status: 409 },
@@ -845,7 +950,7 @@ export async function createCrewEvent(taskId, body) {
     let completedNotes = existing.rows[0].completed_notes ?? null;
     let failedReason = existing.rows[0].failed_reason ?? null;
 
-    if (reopeningCompleted) {
+    if (reopening) {
       // Clear this user's prior end so they can work and end again.
       await client.query(
         `DELETE FROM task_crew_events
@@ -877,7 +982,7 @@ export async function createCrewEvent(taskId, body) {
     }
 
     let eventRow;
-    if (reopeningCompleted) {
+    if (reopening) {
       const priorStarted = await client.query(
         `SELECT id
          FROM task_crew_events
@@ -952,7 +1057,7 @@ export async function createCrewEvent(taskId, body) {
       : null;
 
     if (eventType === "started") {
-      if (reopeningCompleted) {
+      if (reopening) {
         nextStatus = startStatus;
         completedAt = null;
         await client.query(
@@ -1047,6 +1152,13 @@ export async function createCrewEvent(taskId, body) {
 
     await client.query("COMMIT");
 
+    if (nextStatus !== fromStatus) {
+      await maybeSendTerminalEmails(taskId, {
+        fromStatus,
+        toStatus: nextStatus,
+      });
+    }
+
     const completionNotes = await listCompletionNotes(getPool(), taskId);
 
     return {
@@ -1111,9 +1223,17 @@ export async function updateTaskStatus(taskId, body) {
   }
 
   const notesProvided = Object.prototype.hasOwnProperty.call(body, "notes");
-  const notes = notesProvided ? asString(body.notes) : null;
+  const notes = notesProvided
+    ? (body.notes == null ? "" : String(body.notes))
+    : null;
   const notesValue = notes != null && notes.length > 0 ? notes : null;
   const authorUserId = asString(body.userId) || null;
+
+  if (status === "Failed" && notesValue == null) {
+    throw Object.assign(new Error("Failed reason is required"), {
+      status: 400,
+    });
+  }
 
   const pool = getPool();
   const client = await pool.connect();
@@ -1267,6 +1387,11 @@ export async function updateTaskStatus(taskId, body) {
     });
 
     await client.query("COMMIT");
+
+    await maybeSendTerminalEmails(taskId, {
+      fromStatus,
+      toStatus: status,
+    });
 
     const completionNotes = await listCompletionNotes(pool, taskId);
 

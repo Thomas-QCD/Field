@@ -19,7 +19,7 @@ Field mirrors and will eventually replace a third-party FWM product the organiza
 
 - Creating and assigning **tasks** (web, authenticated)
 - Executing tasks in the field (mobile, QR activation)
-- Generating **PDF documents** (shipping label, delivery docket, proof of delivery)
+- Generating **PDF documents** (shipping label, delivery docket, proof of completion)
 - **Automatic email** delivery tied to task events
 
 Out of scope for this SDD: detailed UI mockups, PDF template layouts, production AWS provisioning runbooks, and licensed-product vendor identification.
@@ -244,16 +244,17 @@ unassigned    → assigned
 assigned      → loaded | in_progress | failed
 loaded        → in_progress | failed
 in_progress   → completed | failed | undetermined
-completed     → in_progress (reopen)
+completed     → in_progress (reopen via crew start)
 failed        → (terminal)
-undetermined  → (terminal)
+undetermined  → in_progress (reopen via crew start)
 cancelled     → (terminal)
 ```
 
 **Crew Start / End** (separate from admin status PATCH): each assigned crew member logs at most one `started` and one `ended` in `task_crew_events` (time + optional GPS). Task status is derived:
 
 - First crew **Start** → `In Progress` (unless already In Progress or terminal)
-- When every crew member who **Started** has also **Ended** → `Completed` (assigned crew who never started do not block)
+- **Start** on `Completed` or `Undetermined` → reopen to `In Progress` (Delivery → `Loaded`); clears that user's prior end + note
+- When every crew member who **Started** has also **Ended** → `Completed` | `Failed` | `Undetermined` from per-user outcomes (assigned crew who never started do not block)
 
 Confirm remaining admin transitions with operations before enforcing in code.
 
@@ -268,7 +269,7 @@ Confirm remaining admin transitions with operations before enforcing in code.
 | `addresses`                       | Destination (job site) locations                  |
 | `tasks`                           | Core work unit                                    |
 | `task_contacts`                 | Contacts assigned to a task (0..many)             |
-| `task_crew_members`               | Crew assigned to a task (0..many)                 |
+| `task_crew_members`               | Crew assigned to a task (0..many); one `is_lead` per task |
 | `task_crew_events`                | Per-crew start/end check-ins (time + GPS)         |
 | `task_attachments`                | Photos, signatures (S3)                           |
 | `task_documents`                  | Generated PDFs (S3)                               |
@@ -333,6 +334,7 @@ interface TaskReadModel {
 	description: string | null;
 	externalKey: string | null;
 	crewMemberIds: string[];
+	leadCrewMemberId?: string | null;
 	assignedCrew: { id: string; displayName: string }[];
 	contact: {
 		id: number;
@@ -470,7 +472,7 @@ Implement role checks in API middleware for web routes. Mobile routes validate t
 | --------------- | ----------------- | --------------------- |
 | Shipping label  | `shipping_label`  | Status → `loaded`     |
 | Delivery docket | `delivery_docket` | Status → `assigned`   |
-| POD             | `pod`             | Status → `completed`  |
+| Proof of Completion | `proof_of_completion` | Status → `completed` |
 
 **Pipeline:**
 
@@ -490,18 +492,30 @@ Task event → API creates email_deliveries (pending) → email provider send
     → update status (sent | failed) → retry on failure
 ```
 
-**Implemented (pipeline only):** [`server/email.mjs`](../server/email.mjs) (SES default / console) + [`server/emailDeliveries.mjs`](../server/emailDeliveries.mjs). Manual smoke test: `npm run email:test`. From `noreply@qcdlv.net` (domain `qcdlv.net` in us-west-1). Automatic task-event triggers not wired yet.
+**Implemented:** [`server/email.mjs`](../server/email.mjs) (SES default / console) + [`server/emailDeliveries.mjs`](../server/emailDeliveries.mjs) + [`server/taskCompletionEmails.mjs`](../server/taskCompletionEmails.mjs). Manual smoke test: `npm run email:test` (`--kind order-delivered|task-completed|task-failed`). From `noreply@qcdlv.net` (domain `qcdlv.net` in us-west-1).
+
+**Auto triggers (wired):** when a task first reaches **Completed** or **Failed** (crew end that terminalizes the task, or admin status PATCH), contacts with `receives_email` get:
+
+| Status | Task types | Template |
+| ------ | ---------- | -------- |
+| Completed | Delivery | [`emails/order-delivered.html`](../emails/order-delivered.html) |
+| Completed | Install, Removal, Site Survey | [`emails/task-completed.html`](../emails/task-completed.html) (type-specific headline) |
+| Failed | Delivery, Install, Removal, Site Survey | [`emails/task-failed.html`](../emails/task-failed.html) (type-specific headline) |
+
+Skipped: `Undetermined`, `Pickup`, `Other`. Sends are non-blocking (API succeeds even if SES fails; logged in `email_deliveries`).
+
+All three templates include a customer tracking button linking to `/t/:public_token`. The link needs an absolute origin, so `PUBLIC_APP_URL` must be set; when it is unset the CTA block is stripped from the email rather than shipping a broken relative link.
 
 **Data sources:** assigned contact emails (`contacts` via `task_contacts`), task fields, links to PDFs.
 
-**Draft trigger matrix** (confirm with operations):
+**Draft trigger matrix** (remaining / confirm with operations):
 
 | Event          | Email purpose                         |
 | -------------- | ------------------------------------- |
 | Task assigned  | Internal / crew notification          |
 | Task loaded    | Warehouse / dispatch                  |
-| Task completed | POD or completion notice to contact |
-| Task failed    | Alert creator or contact            |
+| Task completed | Completion notice to contact (wired) |
+| Task failed    | Failure notice to contact (wired) |
 
 ### 8.3 MVP bar for documents and email
 
@@ -680,7 +694,7 @@ RDS, attachments S3, and SES are in use. Staging CDK (not yet provisioned until 
 3. **Status workflow** — transitions in app code; crew start/end via `task_crew_events`
 4. **Mobile crew flow** — Capacitor build, QR activation, task list, status, photo upload
 5. **PDF pipeline** — one template, local `./storage/documents`
-6. **Email pipeline** — SES + `email_deliveries` (manual test); auto triggers next
+6. **Email pipeline** — SES + `email_deliveries`; Completed/Failed auto emails for Delivery + Install/Removal/Site Survey
 7. **Remaining PDFs and email triggers** — expand matrix
 8. **AWS integration** — when user specifies; swap providers (S3, SES); web auth remains Entra ID
 

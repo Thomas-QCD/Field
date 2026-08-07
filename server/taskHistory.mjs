@@ -149,42 +149,13 @@ export async function getTaskHistory(taskId) {
         NULL::text AS from_status,
         NULL::text AS to_status,
         NULL::text AS summary,
-        CASE
-          WHEN e.latitude IS NOT NULL AND e.longitude IS NOT NULL
-            THEN 'GPS ' || round(e.latitude::numeric, 5)::text
-              || ', ' || round(e.longitude::numeric, 5)::text
-              || CASE
-                   WHEN e.accuracy_meters IS NOT NULL
-                     THEN ' (±' || round(e.accuracy_meters::numeric, 0)::text || ' m)'
-                   ELSE ''
-                 END
-          ELSE NULL
-        END AS detail,
+        NULL::text AS detail,
         e.latitude,
         e.longitude,
         e.accuracy_meters
       FROM task_crew_events e
       LEFT JOIN users u ON u.id = e.user_id
       WHERE e.task_id = $1
-
-      UNION ALL
-
-      -- Completion / failure notes
-      SELECT
-        'note:' || n.task_id::text || ':' || n.user_id::text AS id,
-        'note_added'::text AS event_type,
-        COALESCE(n.updated_at, n.created_at) AS recorded_at,
-        u.display_name AS actor_name,
-        NULL::text AS from_status,
-        n.outcome::text AS to_status,
-        NULLIF(trim(n.notes), '') AS summary,
-        NULL::text AS detail,
-        NULL::numeric AS latitude,
-        NULL::numeric AS longitude,
-        NULL::numeric AS accuracy_meters
-      FROM task_completion_notes n
-      LEFT JOIN users u ON u.id = n.user_id
-      WHERE n.task_id = $1
 
       UNION ALL
 
@@ -241,32 +212,6 @@ export async function getTaskHistory(taskId) {
         NULL::numeric AS accuracy_meters
       FROM email_deliveries ed
       WHERE ed.task_id = $1
-
-      UNION ALL
-
-      -- Cancelled (legacy tasks without a history row)
-      SELECT
-        'cancelled:' || t.id::text AS id,
-        'cancelled'::text AS event_type,
-        t.cancelled_at AS recorded_at,
-        NULL::text AS actor_name,
-        t.status_before_cancel::text AS from_status,
-        'Cancelled'::text AS to_status,
-        NULL::text AS summary,
-        NULL::text AS detail,
-        NULL::numeric AS latitude,
-        NULL::numeric AS longitude,
-        NULL::numeric AS accuracy_meters
-      FROM tasks t
-      WHERE t.id = $1
-        AND t.cancelled_at IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1
-          FROM task_history_events h
-          WHERE h.task_id = t.id
-            AND h.event_type IN ('status_changed', 'cancelled')
-            AND h.to_status = 'Cancelled'::task_status
-        )
     ) events
     ORDER BY recorded_at ASC, id ASC
     `,
@@ -292,7 +237,7 @@ export async function getTaskHistory(taskId) {
 }
 
 /**
- * Customer-safe timeline: status milestones + docket/POD documents only.
+ * Customer-safe timeline: status milestones + customer documents only.
  * No crew names, GPS, emails, attachments, or completion notes.
  * @param {number} taskId
  */
@@ -348,26 +293,15 @@ export async function getPublicTaskHistory(taskId) {
         d.kind AS detail
       FROM task_documents d
       WHERE d.task_id = $1
-        AND d.kind IN ('delivery_docket', 'pod')
-
-      UNION ALL
-
-      SELECT
-        'cancelled:' || t.id::text AS id,
-        'cancelled'::text AS event_type,
-        t.cancelled_at AS recorded_at,
-        t.status_before_cancel::text AS from_status,
-        'Cancelled'::text AS to_status,
-        NULL::text AS detail
-      FROM tasks t
-      WHERE t.id = $1
-        AND t.cancelled_at IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1
-          FROM task_history_events h
-          WHERE h.task_id = t.id
-            AND h.event_type IN ('status_changed', 'cancelled')
-            AND h.to_status = 'Cancelled'::task_status
+        AND d.kind IN ('delivery_docket', 'proof_of_completion', 'pod')
+        AND (
+          d.kind <> 'delivery_docket'
+          OR EXISTS (
+            SELECT 1
+            FROM tasks document_task
+            WHERE document_task.id = d.task_id
+              AND document_task.task_type = 'Delivery'
+          )
         )
     ) events
     ORDER BY recorded_at ASC, id ASC
@@ -399,6 +333,9 @@ export async function getPublicTaskHistory(taskId) {
             : "Status updated";
     } else if (type === "document_generated") {
       if (detail === "pod") title = "Proof of delivery available";
+      else if (detail === "proof_of_completion") {
+        title = "Proof of completion available";
+      }
       else if (detail === "delivery_docket") title = "Delivery docket available";
       else title = "Document available";
     }
@@ -416,7 +353,7 @@ export async function getPublicTaskHistory(taskId) {
 }
 
 /**
- * Crew start/end logs a status_changed (and often a note) at the same instant.
+ * Crew start/end can log a status_changed at the same instant.
  * Fold those into one timeline row so the UI shows a single action.
  *
  * @param {Array<{
@@ -469,10 +406,6 @@ function coalesceRelatedHistoryEvents(events) {
         continue;
       }
 
-      if (event.type === "crew_ended" && other.type === "note_added") {
-        if (other.summary) merged.summary = other.summary;
-        skip.add(j);
-      }
     }
 
     out.push(merged);

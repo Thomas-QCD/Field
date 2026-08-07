@@ -1,4 +1,4 @@
-import { useEffect, useState, Fragment, type ReactNode } from 'react';
+import { useEffect, useRef, useState, Fragment, type ReactNode } from 'react';
 import {
 	Stack,
 	Group,
@@ -21,6 +21,7 @@ import {
 	Printer,
 	RefreshCw,
 	Ban,
+	Copy,
 } from 'lucide-react';
 import { getTask, openDeliveryDocket, updateTaskStatus } from '../api/tasks';
 import { useCurrentUser } from '../context/CurrentUserContext';
@@ -29,6 +30,7 @@ import { formatTimeAgo } from '../formatTime';
 import { isEmptyTaskDesc } from '../taskDescHtml';
 import type { TaskDetail, TaskStatus } from '../types/task';
 import { statusTransitionsFor } from '../../shared/statusTransitions.js';
+import { CloneTaskModal } from './CloneTaskModal';
 import { KeyboardAwareModal } from './KeyboardAwareModal';
 import { TaskDescHtml } from './TaskDescHtml';
 import { TaskAttachments } from './TaskAttachments';
@@ -44,6 +46,7 @@ interface TaskDetailModalProps {
 	onDelete?: (task: TaskDetail) => Promise<void>;
 	onRestore?: (task: TaskDetail) => Promise<void>;
 	onStatusChange?: (task: { id: number; status: TaskStatus }) => void;
+	onCloned?: (newTaskId: number) => void | Promise<void>;
 }
 
 function formatDateTime(value: string | null): string {
@@ -135,6 +138,7 @@ export function TaskDetailModal({
 	onDelete,
 	onRestore,
 	onStatusChange,
+	onCloned,
 }: TaskDetailModalProps) {
 	const { user } = useCurrentUser();
 	const [task, setTask] = useState<TaskDetail | null>(null);
@@ -143,10 +147,17 @@ export function TaskDetailModal({
 	const [actionBusy, setActionBusy] = useState(false);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const [actionNotice, setActionNotice] = useState<string | null>(null);
+	const [cloneOpen, setCloneOpen] = useState(false);
 	const [pendingOutcome, setPendingOutcome] = useState<
 		'Completed' | 'Failed' | null
 	>(null);
 	const [statusNotes, setStatusNotes] = useState('');
+	const scrollRef = useRef<HTMLDivElement | null>(null);
+
+	useEffect(() => {
+		if (!pendingOutcome) return;
+		scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+	}, [pendingOutcome]);
 
 	useEffect(() => {
 		if (!opened || taskId == null) {
@@ -158,6 +169,7 @@ export function TaskDetailModal({
 			setActionNotice(null);
 			setPendingOutcome(null);
 			setStatusNotes('');
+			setCloneOpen(false);
 			return;
 		}
 
@@ -213,11 +225,7 @@ export function TaskDetailModal({
 			setActionError(null);
 			setActionNotice(null);
 			setPendingOutcome(status);
-			setStatusNotes(
-				status === 'Failed'
-					? (task.failedReason ?? '')
-					: (task.completedNotes ?? ''),
-			);
+			setStatusNotes('');
 			return;
 		}
 
@@ -252,12 +260,16 @@ export function TaskDetailModal({
 
 	const handleSaveOutcome = async () => {
 		if (!task || !pendingOutcome || actionBusy) return;
+		if (pendingOutcome === 'Failed' && statusNotes.length === 0) {
+			setActionError('Failed reason is required');
+			return;
+		}
 		setActionBusy(true);
 		setActionError(null);
 		setActionNotice(null);
 		try {
 			const updated = await updateTaskStatus(task.id, pendingOutcome, {
-				notes: statusNotes.trim(),
+				notes: statusNotes,
 				userId: user?.id,
 			});
 			setTask((prev) =>
@@ -336,17 +348,11 @@ export function TaskDetailModal({
 		task?.completionNotes?.filter((n) => n.outcome === 'Completed') ?? [];
 	const failedNoteEntries =
 		task?.completionNotes?.filter((n) => n.outcome === 'Failed') ?? [];
-	const hasLegacyCompleted =
-		Boolean(task?.completedNotes?.trim()) && completedNoteEntries.length === 0;
-	const hasLegacyFailed =
-		Boolean(task?.failedReason?.trim()) && failedNoteEntries.length === 0;
 	const showCompletionCallout =
 		Boolean(task) &&
 		(pendingOutcome != null ||
 			completedNoteEntries.length > 0 ||
-			failedNoteEntries.length > 0 ||
-			hasLegacyCompleted ||
-			hasLegacyFailed);
+			failedNoteEntries.length > 0);
 
 	const renderNoteEntries = (
 		entries: NonNullable<TaskDetail['completionNotes']>,
@@ -373,6 +379,7 @@ export function TaskDetailModal({
 	);
 
 	return (
+		<>
 		<KeyboardAwareModal
 			opened={opened}
 			onClose={onClose}
@@ -414,7 +421,7 @@ export function TaskDetailModal({
 				</Alert>
 			) : task ? (
 				<>
-					<div className='task-detail-scroll'>
+					<div className='task-detail-scroll' ref={scrollRef}>
 						<Stack gap='lg' className='task-detail-scroll-stack'>
 							<div className='task-detail-layout'>
 								<div className='task-detail-main'>
@@ -464,6 +471,10 @@ export function TaskDetailModal({
 																			: 'brand'
 																	}
 																	loading={actionBusy}
+																	disabled={
+																		pendingOutcome === 'Failed' &&
+																		statusNotes.length === 0
+																	}
 																	onClick={() => void handleSaveOutcome()}
 																>
 																	{pendingOutcome === 'Failed'
@@ -499,39 +510,6 @@ export function TaskDetailModal({
 														{renderNoteEntries(failedNoteEntries, 'Failed')}
 													</div>
 												) : null}
-
-												{hasLegacyCompleted ? (
-													<div className='task-detail-completion'>
-														<p className='task-detail-completion-notes'>
-															{task.completedNotes!.trim()}
-														</p>
-														{task.completedAt || task.completionNotesByName ? (
-															<p className='task-detail-completion-meta'>
-																Completed
-																{task.completedAt
-																	? ` at ${formatDateTime(task.completedAt)}`
-																	: ''}
-																{task.completionNotesByName
-																	? ` by ${formatShortName(task.completionNotesByName)}`
-																	: ''}
-															</p>
-														) : null}
-													</div>
-												) : null}
-
-												{hasLegacyFailed ? (
-													<div className='task-detail-completion task-detail-completion--failed'>
-														<p className='task-detail-completion-notes'>
-															{task.failedReason!.trim()}
-														</p>
-														{task.completionNotesByName ? (
-															<p className='task-detail-completion-meta'>
-																Failed by{' '}
-																{formatShortName(task.completionNotesByName)}
-															</p>
-														) : null}
-													</div>
-												) : null}
 											</Stack>
 										) : null}
 
@@ -563,17 +541,28 @@ export function TaskDetailModal({
 													</dd>
 												</>
 											) : null}
-											<DetailField
-												label='Crew'
-												value={
-													task.crewMembers.length
-														? task.crewMembers
-																.map((m) => formatShortName(m.displayName))
-																.join(', ')
-														: 'Unassigned'
-												}
-											/>
 										</DetailFields>
+
+										<Section label='Crew'>
+											{task.crewMembers.length === 0 ? (
+												<Text size='sm' c='dimmed'>
+													Unassigned
+												</Text>
+											) : (
+												<DetailFields>
+													{task.crewMembers.map((member) => (
+														<Fragment key={member.id}>
+															<dt className='task-detail-field-key'>
+																{member.isLead ? 'Lead' : 'Sub'}
+															</dt>
+															<dd className='task-detail-field-value'>
+																{formatShortName(member.displayName)}
+															</dd>
+														</Fragment>
+													))}
+												</DetailFields>
+											)}
+										</Section>
 
 										<Section label='Contacts'>
 											{task.contacts.length === 0 ? (
@@ -710,6 +699,12 @@ export function TaskDetailModal({
 												) : null}
 											</DetailFields>
 										</Section>
+
+										<p className='task-detail-timestamps'>
+											Created {formatDateTimeWithAgo(task.createdAt)}
+											<br />
+											Updated {formatDateTimeWithAgo(task.updatedAt)}
+										</p>
 									</Stack>
 								</div>
 
@@ -727,12 +722,6 @@ export function TaskDetailModal({
 									/>
 								</aside>
 							</div>
-
-							<Text>
-								Created {formatDateTimeWithAgo(task.createdAt)}
-								{<br />}
-								Updated {formatDateTimeWithAgo(task.updatedAt)}
-							</Text>
 						</Stack>
 					</div>
 
@@ -801,6 +790,14 @@ export function TaskDetailModal({
 										>
 											Print delivery docket
 										</Menu.Item>
+										{onCloned ? (
+											<Menu.Item
+												leftSection={<Copy size={16} />}
+												onClick={() => setCloneOpen(true)}
+											>
+												Clone task
+											</Menu.Item>
+										) : null}
 										<Menu.Sub>
 											<Menu.Sub.Target>
 												<Menu.Sub.Item
@@ -853,5 +850,14 @@ export function TaskDetailModal({
 				</>
 			) : null}
 		</KeyboardAwareModal>
+		{onCloned ? (
+			<CloneTaskModal
+				taskId={task?.id ?? taskId}
+				opened={cloneOpen}
+				onClose={() => setCloneOpen(false)}
+				onCloned={onCloned}
+			/>
+		) : null}
+		</>
 	);
 }

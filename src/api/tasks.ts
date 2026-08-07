@@ -74,6 +74,7 @@ export interface CreateTaskInput {
 	createdByUserId: string;
 	contactIds: number[];
 	pocContactId: number | null;
+	receiveEmailContactIds: number[];
 	taskType: TaskType;
 	externalKey: string;
 	jobTitle: string;
@@ -86,6 +87,8 @@ export interface CreateTaskInput {
 	afterDateTime: string;
 	beforeDateTime: string;
 	crewMemberIds: string[];
+	/** First crew member is lead by default; optional override. */
+	leadCrewMemberId: string | null;
 	guys: number | string;
 	hours: number | string;
 	canStartEarly: boolean;
@@ -101,7 +104,9 @@ export interface CreatedTask {
 	destinationAddressId: number | null;
 	contactIds: number[];
 	pocContactId: number | null;
+	receiveEmailContactIds: number[];
 	crewMemberIds: string[];
+	leadCrewMemberId: string | null;
 }
 
 export async function createTask(input: CreateTaskInput): Promise<CreatedTask> {
@@ -111,6 +116,27 @@ export async function createTask(input: CreateTaskInput): Promise<CreatedTask> {
 		body: JSON.stringify(input),
 	});
 	return expectJsonField(res, 'task', 'Create task failed');
+}
+
+export interface CloneTaskOptions {
+	createdByUserId: string;
+	includeContacts?: boolean;
+	includeCrew?: boolean;
+	includeDates?: boolean;
+	includeAttachments?: boolean;
+	includeExternalKey?: boolean;
+}
+
+export async function cloneTask(
+	id: number,
+	options: CloneTaskOptions,
+): Promise<CreatedTask> {
+	const res = await apiFetch(`/api/tasks/${id}/clone`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(options),
+	});
+	return expectJsonField(res, 'task', 'Clone task failed');
 }
 
 export type UpdateTaskInput = Omit<CreateTaskInput, 'createdByUserId'>;

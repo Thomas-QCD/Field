@@ -32,6 +32,8 @@ import {
 } from '../components/NewTaskModal';
 import { TaskDetailModal } from '../components/TaskDetailModal';
 import { TaskCards } from '../components/TaskCards';
+import { PullToRefreshIndicator } from '../components/PullToRefreshIndicator';
+import { useFieldPullToRefresh } from '../hooks/useFieldPullToRefresh';
 import {
 	AG_GRID_MOBILE_MQ,
 	DEFAULT_VISIBLE_TASK_COLUMNS,
@@ -70,8 +72,7 @@ const DELIVERY_STATUS_TABS = [
 	{
 		value: 'loaded',
 		label: 'Loaded',
-		// Include legacy In Progress so older delivery rows still appear here.
-		statuses: ['Loaded', 'In Progress'],
+		statuses: ['Loaded'],
 	},
 	{ value: 'completed', label: 'Completed', statuses: ['Completed'] },
 	{ value: 'failed', label: 'Failed', statuses: ['Failed'] },
@@ -153,13 +154,17 @@ function startTimeMs(iso: string | null): number {
 }
 
 function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
-	// POC first so the MultiSelect pill order matches “first = POC”.
-	const contactIds = [...task.contacts]
-		.sort((a, b) => Number(b.isPoc) - Number(a.isPoc))
-		.map((c) => c.id);
+	// POC first so list order matches “first = POC”.
+	const contacts = [...task.contacts].sort(
+		(a, b) => Number(b.isPoc) - Number(a.isPoc),
+	);
+	const contactIds = contacts.map((c) => c.id);
 	return {
 		contactIds,
 		pocContactId: contactIds[0] ?? null,
+		receiveEmailContactIds: contacts
+			.filter((c) => c.receivesEmail)
+			.map((c) => c.id),
 		taskType: task.taskType,
 		externalKey: task.externalKey,
 		jobTitle: task.jobTitle ?? '',
@@ -171,7 +176,13 @@ function taskDetailToFormValues(task: TaskDetail): NewTaskFormValues {
 		destinationNotes: task.destinationNotes,
 		afterDateTime: toDateTimeLocal(task.windowStartAt),
 		beforeDateTime: toDateTimeLocal(task.windowEndAt),
-		crewMemberIds: task.crewMembers.map((m) => m.id),
+		crewMemberIds: [...task.crewMembers]
+			.sort((a, b) => Number(b.isLead) - Number(a.isLead))
+			.map((m) => m.id),
+		leadCrewMemberId:
+			task.crewMembers.find((m) => m.isLead)?.id ??
+			task.crewMembers[0]?.id ??
+			null,
 		guys: task.crewSize ?? '',
 		hours: task.estimatedHours ?? '',
 		canStartEarly: task.canStartEarly,
@@ -238,6 +249,7 @@ export function TasksPage({
 		readVisibleTaskColumns,
 	);
 	const gridApiRef = useRef<GridApi<Task> | null>(null);
+	const gridWrapRef = useRef<HTMLDivElement | null>(null);
 
 	const dayFromQuery = useMemo(() => {
 		if (mode !== 'mine') return null;
@@ -443,6 +455,28 @@ export function TasksPage({
 		return () => controller.abort();
 	}, [refreshTasks]);
 
+	const ptrEnabled = Boolean(isMobile) && (useCardView || mode === 'all');
+	const {
+		scrollRef: ptrScrollRef,
+		setScrollElement: setPtrScrollElement,
+		pullPosition,
+		isRefreshing: ptrRefreshing,
+	} = useFieldPullToRefresh({
+		enabled: ptrEnabled,
+		onRefresh: refreshTasks,
+	});
+
+	useEffect(() => {
+		return () => setPtrScrollElement(null);
+	}, [setPtrScrollElement]);
+
+	const bindGridViewport = () => {
+		const viewport = gridWrapRef.current?.querySelector(
+			'.ag-body-viewport',
+		) as HTMLElement | null;
+		setPtrScrollElement(viewport);
+	};
+
 	const handleSaveTask = async (
 		values: NewTaskFormValues,
 		_addAnother: boolean,
@@ -531,10 +565,15 @@ export function TasksPage({
 
 	const pageTitle =
 		mode === 'mine' ? 'My Tasks' : mode === 'delivery' ? 'Delivery' : 'Tasks';
-	const canCreateTask = mode === 'all' || mode === 'delivery';
 
 	return (
 		<Box className='tasks-page'>
+			{ptrEnabled ? (
+				<PullToRefreshIndicator
+					pullPosition={pullPosition}
+					isRefreshing={ptrRefreshing}
+				/>
+			) : null}
 			<Group justify='space-between' mb='md' wrap='nowrap' gap='sm'>
 				<Title order={1} fz={{ base: 'h3', sm: 'h2' }}>
 					{pageTitle}
@@ -577,7 +616,7 @@ export function TasksPage({
 							</Menu.Dropdown>
 						</Menu>
 					) : null}
-					{canCreateTask && !isMobile ? (
+					{!isMobile ? (
 						<Button
 							leftSection={<Plus size={18} />}
 							onClick={() => {
@@ -669,11 +708,14 @@ export function TasksPage({
 					<Loader size='sm' />
 				</Group>
 			) : useCardView ? (
-				<Box className='tasks-cards-wrap'>
+				<Box ref={ptrScrollRef} className='tasks-cards-wrap'>
 					<TaskCards tasks={visibleTasks} onSelect={openTask} />
 				</Box>
 			) : (
-				<Box className='tasks-grid-wrap ag-theme-quartz'>
+				<Box
+					ref={gridWrapRef}
+					className='tasks-grid-wrap ag-theme-quartz'
+				>
 					<AgGridProvider modules={[AllCommunityModule]}>
 						<AgGridReact<Task>
 							rowData={visibleTasks}
@@ -688,9 +730,13 @@ export function TasksPage({
 							onRowClicked={handleRowClicked}
 							onGridReady={(e) => {
 								gridApiRef.current = e.api;
+								if (ptrEnabled) bindGridViewport();
 							}}
 							onGridSizeChanged={(e) => e.api.sizeColumnsToFit()}
-							onFirstDataRendered={(e) => e.api.sizeColumnsToFit()}
+							onFirstDataRendered={(e) => {
+								e.api.sizeColumnsToFit();
+								if (ptrEnabled) bindGridViewport();
+							}}
 						/>
 					</AgGridProvider>
 				</Box>
@@ -718,6 +764,10 @@ export function TasksPage({
 							t.id === updated.id ? { ...t, status: updated.status } : t,
 						),
 					);
+				}}
+				onCloned={async (newTaskId) => {
+					await refreshTasks();
+					setDetailTaskId(newTaskId);
 				}}
 			/>
 		</Box>

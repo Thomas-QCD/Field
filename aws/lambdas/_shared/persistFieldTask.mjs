@@ -480,7 +480,7 @@ export async function persistFieldTask(raw, options = {}) {
       );
       if (crew.rowCount > 0) {
         await client.query(
-          `INSERT INTO task_crew_members (task_id, user_id) VALUES ($1, $2)`,
+          `INSERT INTO task_crew_members (task_id, user_id, is_lead) VALUES ($1, $2, true)`,
           [task.id, task.assignedToDriverUserId],
         );
       } else {

@@ -13,7 +13,9 @@ import {
 import { ChevronLeft, Filter, Search } from 'lucide-react';
 import { listTasks } from '../api/tasks';
 import { DeliveryTaskCards } from '../components/DeliveryTaskCards';
+import { PullToRefreshIndicator } from '../components/PullToRefreshIndicator';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
+import { useFieldPullToRefresh } from '../hooks/useFieldPullToRefresh';
 import type { Task, TaskStatus } from '../types/task';
 
 const STATUS_FILTERS = [
@@ -122,6 +124,15 @@ export function DeliveryPage() {
 		return () => controller.abort();
 	}, [refreshTasks]);
 
+	const {
+		scrollRef: ptrScrollRef,
+		pullPosition,
+		isRefreshing: ptrRefreshing,
+	} = useFieldPullToRefresh({
+		enabled: true,
+		onRefresh: refreshTasks,
+	});
+
 	const statusCounts = useMemo(() => {
 		const counts = { all: 0, assigned: 0, loaded: 0 } as Record<
 			StatusFilterValue,
@@ -200,6 +211,10 @@ export function DeliveryPage() {
 
 	return (
 		<Box className='tasks-page delivery-page'>
+			<PullToRefreshIndicator
+				pullPosition={pullPosition}
+				isRefreshing={ptrRefreshing}
+			/>
 			<Group justify='space-between' mb='md' wrap='nowrap' gap='sm'>
 				<Button
 					variant='default'
@@ -261,7 +276,7 @@ export function DeliveryPage() {
 					<Loader size='sm' />
 				</Group>
 			) : (
-				<Box className='tasks-cards-wrap'>
+				<Box ref={ptrScrollRef} className='tasks-cards-wrap'>
 					<DeliveryTaskCards
 						tasks={visibleTasks}
 						onSelect={(id) => navigate(`/task/${id}`)}

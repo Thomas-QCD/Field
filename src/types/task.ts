@@ -41,6 +41,8 @@ export interface Task {
 export interface TaskCrewMember {
   id: string;
   displayName: string;
+  /** True when this crew member is the task lead; others are sub. */
+  isLead: boolean;
   startedAt: string | null;
   endedAt: string | null;
 }
@@ -52,6 +54,8 @@ export interface TaskContact {
   phone: string;
   email: string;
   isPoc: boolean;
+  /** Whether this contact receives automated emails about the task. */
+  receivesEmail: boolean;
 }
 
 export type AttachmentKind = 'photo' | 'signature' | 'document' | 'video';

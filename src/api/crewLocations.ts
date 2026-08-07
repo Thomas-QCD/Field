@@ -11,7 +11,10 @@ export interface CrewLocation {
 	accuracyMeters: number | null;
 	recordedAt: string;
 	taskId: number;
-	taskDesc: string | null;
+	taskType: string;
+	externalKey: string;
+	jobTitle: string;
+	destinationAddress: string;
 }
 
 export async function listCrewLocations(

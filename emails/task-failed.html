@@ -4,7 +4,7 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta http-equiv="X-UA-Compatible" content="IE=edge" />
-		<title>Your order has been delivered!</title>
+		<title>{{headline}}</title>
 		<!--[if mso]>
 			<noscript>
 				<xml>
@@ -68,7 +68,7 @@
 				mso-hide: all;
 			"
 		>
-			Your order has been delivered! Thanks for choosing Quick Change Display.
+			{{headline}} Please contact Quick Change Display for support.
 		</div>
 
 		<table
@@ -159,7 +159,7 @@
 										color: #141414;
 									"
 								>
-									Your order has been delivered!
+									{{headline}}
 								</h1>
 							</td>
 						</tr>
@@ -189,12 +189,16 @@
 												color: #3a353c;
 											"
 										>
-											<strong style="color: #732e75">Order</strong>
+											<strong style="color: #732e75">Task</strong>
 											&nbsp;&nbsp;{{job_title}}<br />
-											<strong style="color: #732e75">Delivered to</strong>
+											<strong style="color: #732e75">Type</strong>
+											&nbsp;&nbsp;{{task_type}}<br />
+											<strong style="color: #732e75">Location</strong>
 											&nbsp;&nbsp;{{destination_name}}<br />
-											<strong style="color: #732e75">Completed</strong>
-											&nbsp;&nbsp;{{completed_at}}
+											<strong style="color: #732e75">Updated</strong>
+											&nbsp;&nbsp;{{completed_at}}<br />
+											<strong style="color: #732e75">Reason</strong>
+											&nbsp;&nbsp;{{failed_reason}}
 										</td>
 									</tr>
 								</table>
@@ -233,7 +237,7 @@
 													text-decoration: none;
 													border-radius: 6px;
 												"
-												>Track your order</a
+												>View task details</a
 											>
 										</td>
 									</tr>
@@ -255,8 +259,8 @@
 								"
 							>
 								<p style="margin: 0">
-									Thanks for choosing QCD! Please reach out to us at
-									qcd@qcdlv.com for support.
+									We apologize for the inconvenience. Please reach out to us at
+									qcd@qcdlv.com and we will help resolve this.
 								</p>
 							</td>
 						</tr>
@@ -277,7 +281,7 @@
 								"
 							>
 								Quick Change Display &middot; noreply@qcdlv.net<br />
-								This automated message was sent regarding your recent order.
+								This automated message was sent regarding your recent task.
 								Please do not reply to this email.
 							</td>
 						</tr>

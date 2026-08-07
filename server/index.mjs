@@ -15,6 +15,7 @@ import {
   getBearerToken,
 } from "./auth.mjs";
 import { getPool } from "./db.mjs";
+import { cloneTask } from "./cloneTask.mjs";
 import { createCrewEvent, createTask, updateTask, updateTaskStatus, listCompletionNotes, endOpenCrewStarts } from "./createTask.mjs";
 import { getTaskHistory, recordTaskHistoryEvent } from "./taskHistory.mjs";
 import {
@@ -649,10 +650,21 @@ async function listCrewLocations() {
        e.accuracy_meters,
        e.recorded_at,
        e.task_id,
-       t.description
+       t.task_type,
+       t.external_key,
+       t.job_title,
+       CASE
+         WHEN a.id IS NULL THEN ''
+         WHEN a.address_name IS NOT NULL AND a.address_name <> ''
+           THEN a.address_name
+         WHEN a.building IS NOT NULL AND a.building <> ''
+           THEN a.street_line || ', ' || a.building
+         ELSE a.street_line
+       END AS destination_address
      FROM task_crew_events e
      JOIN users u ON u.id = e.user_id
      JOIN tasks t ON t.id = e.task_id
+     LEFT JOIN addresses a ON a.id = t.destination_address_id
      WHERE e.latitude IS NOT NULL
        AND e.longitude IS NOT NULL
        AND u.is_active = true
@@ -669,7 +681,10 @@ async function listCrewLocations() {
       row.accuracy_meters != null ? Number(row.accuracy_meters) : null,
     recordedAt: new Date(row.recorded_at).toISOString(),
     taskId: Number(row.task_id),
-    taskDesc: row.description ?? null,
+    taskType: row.task_type,
+    externalKey: row.external_key ?? "",
+    jobTitle: row.job_title ?? "",
+    destinationAddress: row.destination_address ?? "",
   }));
 }
 
@@ -741,7 +756,7 @@ async function listTasks(opts = {}) {
          ELSE a.street_line
        END AS destination_address,
        (
-         SELECT string_agg(u.display_name, ', ' ORDER BY u.display_name)
+         SELECT string_agg(u.display_name, ', ' ORDER BY tcm.is_lead DESC, u.display_name)
          FROM task_crew_members tcm
          JOIN users u ON u.id = tcm.user_id
          WHERE tcm.task_id = t.id
@@ -832,7 +847,8 @@ async function getTask(id) {
                'title', COALESCE(c.title, ''),
                'phone', COALESCE(c.phone, ''),
                'email', COALESCE(c.email, ''),
-               'isPoc', tc.is_poc
+               'isPoc', tc.is_poc,
+               'receivesEmail', tc.receives_email
              )
              ORDER BY tc.is_poc DESC, c.name
            ),
@@ -848,6 +864,7 @@ async function getTask(id) {
              json_build_object(
                'id', u.id::text,
                'displayName', u.display_name,
+               'isLead', tcm.is_lead,
                'startedAt', (
                  SELECT e.recorded_at
                  FROM task_crew_events e
@@ -863,7 +880,7 @@ async function getTask(id) {
                    AND e.event_type = 'ended'
                )
              )
-             ORDER BY u.display_name
+             ORDER BY tcm.is_lead DESC, u.display_name
            ),
            '[]'::json
          )
@@ -907,6 +924,7 @@ async function getTask(id) {
           phone: c.phone ?? "",
           email: c.email ?? "",
           isPoc: Boolean(c.isPoc),
+          receivesEmail: Boolean(c.receivesEmail),
         }))
       : [],
     crewSize: row.crew_size != null ? Number(row.crew_size) : null,
@@ -949,6 +967,7 @@ async function getTask(id) {
       ? row.crew_members.map((m) => ({
           id: String(m.id),
           displayName: m.displayName ?? "",
+          isLead: Boolean(m.isLead),
           startedAt: m.startedAt
             ? new Date(m.startedAt).toISOString()
             : null,
@@ -1264,6 +1283,14 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && taskRestoreMatch) {
       const task = await restoreTask(Number(taskRestoreMatch[1]));
       sendJson(res, { task });
+      return;
+    }
+
+    const taskCloneMatch = url.pathname.match(/^\/api\/tasks\/(\d+)\/clone$/);
+    if (req.method === "POST" && taskCloneMatch) {
+      const body = await readJsonBody(req);
+      const task = await cloneTask(Number(taskCloneMatch[1]), body);
+      sendJson(res, { task }, 201);
       return;
     }
 

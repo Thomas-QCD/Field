@@ -14,7 +14,7 @@ The system must generate PDF documents tied to tasks. Three document types are c
 |----------|---------|----------------------|
 | **Shipping label** | Label for physical shipment / load identification | On assign or load (e.g. status → `loaded`) |
 | **Delivery docket** | Instructions and details for the crew / job packet | On assign or before execution |
-| **POD** (proof of delivery) | Completion record — may include photos, notes, signature | On task completion |
+| **Proof of Completion** | Completion record (the generalized POD) — may include photos, notes, signature | On task completion |
 
 **Requirements (draft):**
 
@@ -46,7 +46,7 @@ The system must **send emails automatically** without manual copy/paste. Contact
 
 **Known data sources:**
 
-- `contacts.email` — contact email (via `task_contacts` on the task).
+- `contacts.email` — contact email (via `task_contacts` on the task; only contacts with `receives_email` should be notified).
 - Task fields — description, scheduling window, destination, status, links to PDFs.
 
 **Requirements (draft):**

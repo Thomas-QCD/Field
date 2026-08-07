@@ -136,7 +136,7 @@ App, API, and most services run on the developer machine. **RDS PostgreSQL `fiel
 
 **S3 `field-dev-attachments` (dev):** private bucket in us-west-1 for task attachments (presigned PUT/GET). CORS allows browser Vite, Android emulator (`10.0.2.2`), Capacitor WebView origins, and the current LAN IP for `cap:live -- device`. When the LAN IP changes: `npm run s3:cors`. Env: `AWS_REGION`, `S3_BUCKET` in [`.env.example`](.env.example).
 
-**SES (dev):** domain identity `qcdlv.net` verified in us-west-1 (DKIM OK); default From `noreply@qcdlv.net`; config set `notify_on_error`. Pipeline: [`server/email.mjs`](server/email.mjs) + [`server/emailDeliveries.mjs`](server/emailDeliveries.mjs). Smoke test: `npm run email:test`. Env: `EMAIL_PROVIDER`, `EMAIL_FROM`, `EMAIL_CONFIGURATION_SET` in [`.env.example`](.env.example).
+**SES (dev):** domain identity `qcdlv.net` verified in us-west-1 (DKIM OK); default From `noreply@qcdlv.net`; config set `notify_on_error`. Pipeline: [`server/email.mjs`](server/email.mjs) + [`server/emailDeliveries.mjs`](server/emailDeliveries.mjs) + [`server/taskCompletionEmails.mjs`](server/taskCompletionEmails.mjs) (Completed/Failed → contacts). Smoke test: `npm run email:test` (`--kind order-delivered|task-completed|task-failed`). Env: `EMAIL_PROVIDER`, `EMAIL_FROM`, `EMAIL_CONFIGURATION_SET` in [`.env.example`](.env.example).
 
 **Wodely sync (AWS):** Licensed-system webhooks hit Lambda `WOO-message-handler` (API Gateway); reconciler `updateModifiedWooTasks` runs on EventBridge Scheduler. Both dual-write DynamoDB `WOO-tasks` and RDS `field` (`tasks.id` = Wodely Id). Source under [`aws/lambdas/`](aws/lambdas/). Type/status mapping in [`docs/database-design.md`](docs/database-design.md).
 
@@ -209,6 +209,8 @@ Field workforce management covers work performed outside a central office. Model
 - Tasks use **destination only** — Field does not model dispatch/pickup (single fixed origin).
 - Contacts and destination are assigned separately (0..many contacts, 0..1 address).
 - Each task has at most one **POC** (point of contact) among its contacts — typically the first contact added (`task_contacts.is_poc`).
+- Per-contact `receives_email` controls automated task emails (POC defaults on; others default off).
+- Each task has at most one **lead** among its crew members — typically the first crew member added (`task_crew_members.is_lead`); the rest are **sub**. Informational for now (same pattern as POC).
 - Crew members are assigned by user ID; display names come from `users` (join), not stored on the task.
 - Photo proof may be instruction-driven (described in `TaskDesc`) — attachment model TBD.
 

@@ -5,7 +5,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getPool } from "./db.mjs";
-import { generateAndStoreDeliveryDocket } from "./deliveryDocket.mjs";
+import {
+  CURRENT_DOCUMENT_STORAGE_PREFIX,
+  generateAndStoreDeliveryDocket,
+  generateAndStoreProofOfCompletion,
+} from "./deliveryDocket.mjs";
 import { getPublicTaskHistory } from "./taskHistory.mjs";
 import { publicTrackingPath, publicTrackingUrl } from "./publicToken.mjs";
 
@@ -13,7 +17,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const STORAGE_ROOT = path.join(ROOT, "storage");
 
-const PUBLIC_DOC_KINDS = new Set(["delivery_docket", "pod"]);
+const PUBLIC_DOC_KINDS = new Set([
+  "delivery_docket",
+  "proof_of_completion",
+  "pod",
+]);
 
 /**
  * @param {unknown} token
@@ -25,24 +33,49 @@ function normalizeToken(token) {
 }
 
 /**
+ * Customer-facing noun per task type. Delivery keeps "order" so existing
+ * delivery wording is unchanged; see emails/task-completed.html for parity.
+ * @type {Record<string, string>}
+ */
+const TYPE_NOUNS = {
+  Delivery: "order",
+  Install: "install",
+  Removal: "removal",
+  "Site Survey": "site survey",
+  Pickup: "pickup",
+  Other: "order",
+};
+
+/**
+ * @param {string} taskType
+ */
+function nounForType(taskType) {
+  return TYPE_NOUNS[taskType] ?? "order";
+}
+
+/**
+ * @param {string} taskType
  * @param {string} status
  */
-function headlineForStatus(status) {
+function headlineFor(taskType, status) {
+  const noun = nounForType(taskType);
   switch (status) {
     case "Completed":
-      return "Your order has been delivered!";
+      return taskType === "Delivery"
+        ? "Your order has been delivered!"
+        : `Your ${noun} is complete!`;
     case "Failed":
-      return "Your order could not be completed";
+      return `Your ${noun} could not be completed`;
     case "Cancelled":
-      return "Your order was cancelled";
+      return `Your ${noun} was cancelled`;
     case "In Progress":
-      return "Your order is in progress";
+      return `Your ${noun} is in progress`;
     case "Loaded":
-      return "Your order is on the way";
+      return `Your ${noun} is on the way`;
     case "Assigned":
-      return "Your order has been assigned";
+      return `Your ${noun} has been assigned`;
     default:
-      return "Track your order";
+      return `Track your ${noun}`;
   }
 }
 
@@ -82,6 +115,7 @@ export async function getPublicTaskByToken(token) {
     `SELECT
        t.id,
        t.status,
+       t.task_type,
        t.job_title,
        t.completed_at,
        t.public_token,
@@ -104,7 +138,7 @@ export async function getPublicTaskByToken(token) {
     `SELECT kind, file_name
      FROM task_documents
      WHERE task_id = $1
-       AND kind IN ('delivery_docket', 'pod')`,
+       AND kind IN ('delivery_docket', 'proof_of_completion', 'pod')`,
     [taskId],
   );
 
@@ -114,17 +148,27 @@ export async function getPublicTaskByToken(token) {
     byKind.set(String(d.kind), String(d.file_name ?? d.kind));
   }
 
+  const taskType = String(row.task_type ?? "");
   const documents = [
-    {
+    ...(taskType === "Delivery"
+      ? [{
       kind: "delivery_docket",
       fileName: byKind.get("delivery_docket") ?? `delivery-docket-${taskId}.pdf`,
       // Docket can be generated on demand.
       available: true,
-    },
+        }]
+      : []),
     {
-      kind: "pod",
-      fileName: byKind.get("pod") ?? `pod-${taskId}.pdf`,
-      available: byKind.has("pod"),
+      kind: "proof_of_completion",
+      fileName:
+        byKind.get("proof_of_completion") ??
+        byKind.get("pod") ??
+        `proof-of-completion-${taskId}.pdf`,
+      // Generate on demand once the task is complete. Legacy PODs remain usable.
+      available:
+        String(row.status) === "Completed" ||
+        byKind.has("proof_of_completion") ||
+        byKind.has("pod"),
     },
   ];
 
@@ -134,8 +178,10 @@ export async function getPublicTaskByToken(token) {
   return {
     jobTitle: row.job_title ?? "",
     status,
-    headline: headlineForStatus(status),
+    taskType,
+    headline: headlineFor(taskType, status),
     destinationName: row.destination_name ?? "",
+    destinationLabel: taskType === "Delivery" ? "Delivered to" : "Location",
     completedAt: row.completed_at
       ? new Date(row.completed_at).toISOString()
       : null,
@@ -147,10 +193,10 @@ export async function getPublicTaskByToken(token) {
 }
 
 /**
- * Resolve task id + full task row bits needed for docket generation.
+ * Resolve public document access context.
  * @param {string} token
  */
-async function resolveTaskIdByToken(token) {
+async function resolveTaskByToken(token) {
   const publicToken = normalizeToken(token);
   if (!publicToken || publicToken.length > 64) {
     throw Object.assign(new Error("Not found"), { status: 404 });
@@ -158,13 +204,19 @@ async function resolveTaskIdByToken(token) {
 
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT id FROM tasks WHERE public_token = $1 AND deleted_at IS NULL`,
+    `SELECT id, task_type, status
+     FROM tasks
+     WHERE public_token = $1 AND deleted_at IS NULL`,
     [publicToken],
   );
   if (rows.length === 0) {
     throw Object.assign(new Error("Not found"), { status: 404 });
   }
-  return Number(rows[0].id);
+  return {
+    id: Number(rows[0].id),
+    taskType: String(rows[0].task_type),
+    status: String(rows[0].status),
+  };
 }
 
 /**
@@ -179,16 +231,31 @@ export async function getPublicDocument(token, kind, getTask) {
     throw Object.assign(new Error("Not found"), { status: 404 });
   }
 
-  const taskId = await resolveTaskIdByToken(token);
+  const resolvedTask = await resolveTaskByToken(token);
+  const taskId = resolvedTask.id;
   const pool = getPool();
 
   if (docKind === "delivery_docket") {
+    if (resolvedTask.taskType !== "Delivery") {
+      throw Object.assign(new Error("Not found"), { status: 404 });
+    }
     const { rows } = await pool.query(
-      `SELECT storage_key, file_name FROM task_documents
-       WHERE task_id = $1 AND kind = 'delivery_docket'`,
-      [taskId],
+      `SELECT d.storage_key,
+              d.file_name,
+              NOT EXISTS (
+                SELECT 1
+                FROM task_attachments a
+                WHERE a.task_id = d.task_id
+                  AND lower(a.mime_type) LIKE 'image/%'
+                  AND a.created_at > d.generated_at
+              ) AS is_current
+       FROM task_documents d
+       WHERE d.task_id = $1
+         AND d.kind = 'delivery_docket'
+         AND d.storage_key LIKE $2 || '%'`,
+      [taskId, CURRENT_DOCUMENT_STORAGE_PREFIX],
     );
-    if (rows[0]) {
+    if (rows[0]?.is_current) {
       const buf = await readLocalDocument(String(rows[0].storage_key));
       if (buf) {
         return {
@@ -208,25 +275,65 @@ export async function getPublicDocument(token, kind, getTask) {
     return { buffer, fileName };
   }
 
-  // POD — stored document only
+  // Legacy POD links remain valid and serve the stored POD only.
+  if (docKind === "pod") {
+    const { rows } = await pool.query(
+      `SELECT storage_key, file_name FROM task_documents
+       WHERE task_id = $1 AND kind = 'pod'`,
+      [taskId],
+    );
+    if (!rows[0]) {
+      throw Object.assign(new Error("Proof of delivery is not available yet"), {
+        status: 404,
+      });
+    }
+    const buf = await readLocalDocument(String(rows[0].storage_key));
+    if (!buf) {
+      throw Object.assign(new Error("Proof of delivery is not available yet"), {
+        status: 404,
+      });
+    }
+    return {
+      buffer: buf,
+      fileName: String(rows[0].file_name || `pod-${taskId}.pdf`),
+    };
+  }
+
+  // Rebuild when a newer image exists so every completion image is included.
   const { rows } = await pool.query(
-    `SELECT storage_key, file_name FROM task_documents
-     WHERE task_id = $1 AND kind = 'pod'`,
-    [taskId],
+    `SELECT d.storage_key,
+            d.file_name,
+            NOT EXISTS (
+              SELECT 1
+              FROM task_attachments a
+              WHERE a.task_id = d.task_id
+                AND lower(a.mime_type) LIKE 'image/%'
+                AND a.created_at > d.generated_at
+            ) AS is_current
+     FROM task_documents d
+     WHERE d.task_id = $1
+       AND d.kind = 'proof_of_completion'
+       AND d.storage_key LIKE $2 || '%'`,
+    [taskId, CURRENT_DOCUMENT_STORAGE_PREFIX],
   );
-  if (!rows[0]) {
-    throw Object.assign(new Error("Proof of delivery is not available yet"), {
-      status: 404,
-    });
+  if (rows[0]?.is_current) {
+    const buf = await readLocalDocument(String(rows[0].storage_key));
+    if (buf) {
+      return {
+        buffer: buf,
+        fileName: String(
+          rows[0].file_name || `proof-of-completion-${taskId}.pdf`,
+        ),
+      };
+    }
   }
-  const buf = await readLocalDocument(String(rows[0].storage_key));
-  if (!buf) {
-    throw Object.assign(new Error("Proof of delivery is not available yet"), {
-      status: 404,
-    });
+
+  const task = await getTask(taskId);
+  if (!task) {
+    throw Object.assign(new Error("Not found"), { status: 404 });
   }
-  return {
-    buffer: buf,
-    fileName: String(rows[0].file_name || `pod-${taskId}.pdf`),
-  };
+  const { buffer, fileName } = await generateAndStoreProofOfCompletion(task, {
+    generatedByUserId: null,
+  });
+  return { buffer, fileName };
 }

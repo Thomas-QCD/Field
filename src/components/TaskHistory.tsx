@@ -40,6 +40,8 @@ function kindLabel(kind: string | null, count = 1): string {
 			return count === 1 ? 'Shipping label' : 'Shipping labels';
 		case 'delivery_docket':
 			return count === 1 ? 'Delivery docket' : 'Delivery dockets';
+		case 'proof_of_completion':
+			return count === 1 ? 'Proof of completion' : 'Proofs of completion';
 		case 'pod':
 			return count === 1 ? 'Proof of delivery' : 'Proofs of delivery';
 		default: {
@@ -134,10 +136,7 @@ function eventBody(event: TaskHistoryEvent): string | null {
 		return event.detail?.trim() || null;
 	}
 	if (event.type === 'crew_started' || event.type === 'crew_ended') {
-		const notes = event.summary?.trim() || null;
-		const gps = event.detail?.trim() || null;
-		if (notes && gps) return `${notes}\n${gps}`;
-		return notes || gps;
+		return event.summary?.trim() || null;
 	}
 	return event.detail?.trim() || event.summary?.trim() || null;
 }

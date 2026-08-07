@@ -35,8 +35,10 @@ export interface PublicTaskHistoryEvent {
 export interface PublicTaskPayload {
 	jobTitle: string;
 	status: string;
+	taskType: string;
 	headline: string;
 	destinationName: string;
+	destinationLabel: string;
 	completedAt: string | null;
 	documents: PublicTaskDocument[];
 	history: PublicTaskHistoryEvent[];
@@ -65,8 +67,8 @@ function formatWhenWithAgo(value: string | null): string {
 }
 
 function docLabel(kind: string): string {
-	if (kind === 'pod') return 'Proof of delivery';
-	if (kind === 'delivery_docket') return 'Delivery docket';
+	if (kind === 'proof_of_completion' || kind === 'pod') return 'Proof of Completion';
+	if (kind === 'delivery_docket') return 'Delivery Docket';
 	return kind.replace(/_/g, ' ');
 }
 
@@ -212,8 +214,11 @@ export function PublicTaskPage() {
 						>
 							<Stack gap={6}>
 								<DetailRow label='Order' value={data.jobTitle || '—'} />
+								{data.taskType && data.taskType !== 'Delivery' ? (
+									<DetailRow label='Type' value={data.taskType} />
+								) : null}
 								<DetailRow
-									label='Delivered to'
+									label={data.destinationLabel || 'Location'}
 									value={data.destinationName || '—'}
 								/>
 								<DetailRow label='Status' value={data.status} />

@@ -230,13 +230,14 @@ unassigned → assigned
 assigned → loaded | failed
 loaded → in_progress | failed
 in_progress → completed | failed | undetermined
-completed → (terminal)
+completed → in_progress / loaded (reopen via crew start)
+undetermined → in_progress / loaded (reopen via crew start)
 failed → (terminal)
 any (via DELETE) → cancelled
 cancelled → Undetermined (restore within 7 days) | soft-deleted after 7 days
 ```
 
-Crew start/end timeline is `task_crew_events` (derives In Progress / Completed). Explicit status transitions (admin PATCH, cancel/restore, crew-derived status changes) are logged in `task_history_events`. The task History UI aggregates these with attachments, documents, emails, and completion notes.
+Crew start/end timeline is `task_crew_events` (derives In Progress / Loaded / Completed / Failed / Undetermined). Explicit status transitions (admin PATCH, cancel/restore, crew-derived status changes) are logged in `task_history_events`. The task History UI aggregates these with attachments, documents, emails, and completion notes.
 
 ---
 
@@ -287,11 +288,11 @@ Central table. Contacts and crew are junction tables; destination is an optional
 - `(created_at DESC)`
 - `(cancelled_at)` where `status = Cancelled` and `deleted_at IS NULL` — purge window
 
-**Public tracking:** Each task has a `public_token`. Unauthenticated `GET /api/public/tasks/:token` returns a customer-safe summary + history; `GET /api/public/tasks/:token/documents/:kind` serves `delivery_docket` / `pod` PDFs. SPA route: `/t/:token`.
+**Public tracking:** Each task has a `public_token`. Unauthenticated `GET /api/public/tasks/:token` returns a customer-safe summary + history; `GET /api/public/tasks/:token/documents/:kind` serves `delivery_docket` / `proof_of_completion` PDFs (`pod` remains supported for legacy files). SPA route: `/t/:token`.
 
-**Crew assignment:** 0..many via `task_crew_members` (API/form: `crewMemberIds: string[]`).
+**Crew assignment:** 0..many via `task_crew_members` (API/form: `crewMemberIds: string[]`). One lead per task (`is_lead` / `leadCrewMemberId`); defaults to the first crew member in `crewMemberIds`. Remaining assigned crew are sub. Informational for now.
 
-**Contact assignment:** 0..many via `task_contacts` (API/form: `contactIds: number[]`). One POC per task (`is_poc` / `pocContactId`); defaults to the first contact in `contactIds`.
+**Contact assignment:** 0..many via `task_contacts` (API/form: `contactIds: number[]`). One POC per task (`is_poc` / `pocContactId`); defaults to the first contact in `contactIds`. Per-contact `receives_email` / `receiveEmailContactIds` (POC defaults on).
 
 **Destination:** 0..1 via `destinationAddressId` (pick existing venue, or create via Addresses / New address). Task create/update does not auto-insert `addresses` from freeform destination fields.
 
@@ -301,14 +302,19 @@ Central table. Contacts and crew are junction tables; destination is an optional
 
 ### `task_crew_members`
 
-Junction: which crew members are assigned to a task.
+Junction: which crew members are assigned to a task. Exactly **one** crew member may be the task **lead** when crew exist — typically the first crew member added. Remaining assigned crew are **sub**.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `task_id` | `bigint` | PK, FK → `tasks.id` ON DELETE CASCADE |
 | `user_id` | `uuid` | PK, FK → `users.id` |
+| `is_lead` | `boolean` | NOT NULL, default `false` |
 
 **Index:** `(user_id)` — crew member task list / mobile scoping
+
+**Unique partial index:** one `is_lead = true` row per `task_id`.
+
+**API:** `crewMemberIds: string[]`; optional `leadCrewMemberId` (must be in `crewMemberIds`). If omitted, the first `crewMemberIds` entry is lead.
 
 ### `task_contacts`
 
@@ -319,12 +325,13 @@ Junction: which contacts are on a task (mirrors `task_crew_members`). Exactly **
 | `task_id` | `bigint` | PK, FK → `tasks.id` ON DELETE CASCADE |
 | `contact_id` | `bigint` | PK, FK → `contacts.id` |
 | `is_poc` | `boolean` | NOT NULL, default `false` |
+| `receives_email` | `boolean` | NOT NULL, default `false` — automated task emails |
 
 **Index:** `(contact_id)`
 
 **Unique partial index:** one `is_poc = true` row per `task_id`.
 
-**API:** `contactIds: number[]`; optional `pocContactId` (must be in `contactIds`). If omitted, the first `contactIds` entry is POC.
+**API:** `contactIds: number[]`; optional `pocContactId` (must be in `contactIds`). If omitted, the first `contactIds` entry is POC. Optional `receiveEmailContactIds: number[]` (subset of `contactIds`); if omitted, only the POC receives email.
 ---
 
 ## Task Extensions
@@ -356,9 +363,9 @@ Server-generated PDFs per task. Binary content in S3; metadata here. See [`criti
 |--------|------|-------------|
 | `id` | `bigint` | PK |
 | `task_id` | `bigint` | FK → `tasks.id`, NOT NULL |
-| `kind` | `varchar(50)` | NOT NULL | `shipping_label`, `delivery_docket`, `pod` |
+| `kind` | `varchar(50)` | NOT NULL | `shipping_label`, `delivery_docket`, `proof_of_completion` (`pod` legacy) |
 | `storage_key` | `varchar(500)` | NOT NULL | S3 object key |
-| `file_name` | `varchar(255)` | NOT NULL | e.g. `pod-12056480.pdf` |
+| `file_name` | `varchar(255)` | NOT NULL | e.g. `proof-of-completion-12056480.pdf` |
 | `generated_at` | `timestamptz` | NOT NULL | |
 | `generated_by_user_id` | `uuid` | FK → `users.id`, nullable | null if system-generated on status change |
 
@@ -389,8 +396,9 @@ Log of automatic outbound emails. See [`critical-features.md`](critical-features
 
 Append-only per-crew start/end check-in log (one `started` and one `ended` per user per task). Stores when and where each assigned crew member began and finished work. Does **not** replace task status — the service derives status from these events:
 
-- First `started` on the task → `tasks.status = In Progress` (unless already `In Progress` / terminal)
-- When every user with a `started` also has an `ended` → `tasks.status = Completed` + `completed_at` (assigned crew who never started do not block)
+- First `started` on the task → `tasks.status = In Progress` (Delivery → `Loaded`) unless already at that status / terminal
+- `started` on `Completed` or `Undetermined` → reopen to `In Progress` (Delivery → `Loaded`); clears that user's prior `ended` + completion note
+- When every user with a `started` also has an `ended` → `Completed` | `Failed` | `Undetermined` from per-user outcomes + `completed_at` (assigned crew who never started do not block)
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -456,7 +464,7 @@ Append-only audit log for status transitions and restore events. The History UI 
 | `CompletedNotes` / `CompletedDateTime` | `tasks.completed_notes` / `completed_at` |
 | `TaskFailedReason` | `tasks.failed_reason` |
 | Photos (in `TaskDesc` instructions) | `task_attachments` at completion |
-| Generated PDFs | `task_documents` — `shipping_label`, `delivery_docket`, `pod` |
+| Generated PDFs | `task_documents` — `shipping_label`, `delivery_docket`, `proof_of_completion` (`pod` legacy) |
 | Automatic emails | `email_deliveries` |
 | Crew start/end time + geotags | `task_crew_events` |
 
@@ -475,10 +483,11 @@ interface TaskReadModel {
   jobTitle: string | null;
   externalKey: string | null;
   crewMemberIds: string[];
-  assignedCrew: { id: string; displayName: string }[];
+  leadCrewMemberId: string | null;
+  assignedCrew: { id: string; displayName: string; isLead: boolean }[];
   contactIds: number[];
   pocContactId: number | null;
-  contacts: { id: number; name: string; title: string; phone: string; email: string; isPoc: boolean }[];
+  contacts: { id: number; name: string; title: string; phone: string; email: string; isPoc: boolean; receivesEmail: boolean }[];
   destinationAddressId: number | null;
   destination: {
     streetLine: string;
@@ -498,7 +507,7 @@ interface TaskReadModel {
   publicTrackingPath: string;
   publicTrackingUrl: string;
   attachments: TaskAttachmentDto[];
-  documents: TaskDocumentDto[]; // shipping_label | delivery_docket | pod
+  documents: TaskDocumentDto[]; // shipping_label | delivery_docket | proof_of_completion
   createdBy: { id: string; displayName: string };
   createdAt: string;
   updatedAt: string;

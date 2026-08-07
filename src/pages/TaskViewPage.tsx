@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Box, Group, Loader, Text, UnstyledButton } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import {
 	Camera,
 	CheckCircle,
@@ -20,6 +21,7 @@ import {
 	validateAttachmentFile,
 } from '../api/attachments';
 import { MultiShotCamera } from '../components/MultiShotCamera';
+import { PullToRefreshIndicator } from '../components/PullToRefreshIndicator';
 import { TaskAttachments } from '../components/TaskAttachments';
 import { TaskDescHtml } from '../components/TaskDescHtml';
 import { TaskHistory } from '../components/TaskHistory';
@@ -33,9 +35,12 @@ import { isEmptyTaskDesc } from '../taskDescHtml';
 import { formatShortName } from '../formatName';
 import { formatShortDateTimeWithAgo } from '../formatTime';
 import { useAndroidBackHandler } from '../hooks/useAndroidBackHandler';
+import { useFieldPullToRefresh } from '../hooks/useFieldPullToRefresh';
 import { openMapsNavigation } from '../openMapsNavigation';
+import { AG_GRID_MOBILE_MQ } from '../agGridDefaults';
 import type {
 	TaskAttachment,
+	TaskCompletionNote,
 	TaskContact,
 	TaskDetail,
 	TaskStatus,
@@ -43,6 +48,83 @@ import type {
 
 function formatWindow(start: string | null, end: string | null): string {
 	return `${formatShortDateTimeWithAgo(start)} – ${formatShortDateTimeWithAgo(end)}`;
+}
+
+function formatDateTime(value: string | null): string {
+	if (!value) return '—';
+	const d = new Date(value);
+	if (Number.isNaN(d.getTime())) return '—';
+	return d.toLocaleString(undefined, {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit',
+	});
+}
+
+function CompletionCallout({
+	outcome,
+	entries,
+}: {
+	outcome: 'Completed' | 'Failed';
+	entries: TaskCompletionNote[];
+}) {
+	return (
+		<div
+			className={
+				outcome === 'Failed'
+					? 'task-view-callout task-view-callout--failed'
+					: 'task-view-callout'
+			}
+		>
+			{entries.map((entry) => (
+				<div key={entry.userId}>
+					{entry.notes?.trim() ? (
+						<p className='task-view-callout-notes'>{entry.notes.trim()}</p>
+					) : null}
+					<p className='task-view-callout-meta'>
+						{outcome} at {formatDateTime(entry.updatedAt || entry.createdAt)} by{' '}
+						{formatShortName(entry.displayName)}
+					</p>
+				</div>
+			))}
+		</div>
+	);
+}
+
+/** Cancelled / outcome / in-progress callouts, mirroring the desktop task view. */
+function TaskViewBanners({ task }: { task: TaskDetail }) {
+	const completedEntries =
+		task.completionNotes?.filter((n) => n.outcome === 'Completed') ?? [];
+	const failedEntries =
+		task.completionNotes?.filter((n) => n.outcome === 'Failed') ?? [];
+
+	return (
+		<div className='task-view-banners'>
+			{task.status === 'Cancelled' && task.cancelledAt ? (
+				<Alert color='orange' title='Cancelled'>
+					Scheduled for permanent removal on{' '}
+					{formatDateTime(
+						new Date(
+							new Date(task.cancelledAt).getTime() + 7 * 24 * 60 * 60 * 1000,
+						).toISOString(),
+					)}
+					.
+				</Alert>
+			) : null}
+
+			{completedEntries.length > 0 ? (
+				<CompletionCallout outcome='Completed' entries={completedEntries} />
+			) : null}
+
+			{failedEntries.length > 0 ? (
+				<CompletionCallout outcome='Failed' entries={failedEntries} />
+			) : null}
+
+			<TaskStartedCrew status={task.status} crewMembers={task.crewMembers} />
+		</div>
+	);
 }
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -122,18 +204,23 @@ function ActionButton({
 	icon: Icon,
 	onClick,
 	disabled,
+	/** Keep the disabled look but still receive presses (e.g. to toast a reason). */
+	explainDisabled,
 }: {
 	label: string;
 	icon: typeof Navigation;
 	onClick?: () => void;
 	disabled?: boolean;
+	explainDisabled?: boolean;
 }) {
+	const softDisabled = Boolean(disabled && explainDisabled);
 	return (
 		<button
 			type='button'
 			className='task-view-action'
 			onClick={onClick}
-			disabled={disabled}
+			disabled={disabled && !softDisabled}
+			aria-disabled={softDisabled || undefined}
 		>
 			<Icon size={22} strokeWidth={2} aria-hidden />
 			<span>{label}</span>
@@ -234,6 +321,53 @@ function isTerminalStatus(status: TaskStatus): boolean {
 	);
 }
 
+/** Why Start / Load is blocked, or null when the action is allowed. */
+function getStartBlockedReason(
+	task: TaskDetail,
+	me: TaskDetail['crewMembers'][number] | undefined,
+	isDelivery: boolean,
+	busy: boolean,
+): string | null {
+	if (busy) return 'Please wait…';
+	if (!me) return "You're not assigned to this task";
+	// Completed / Undetermined can be reopened by starting again; other terminals cannot.
+	if (task.status === 'Completed' || task.status === 'Undetermined') {
+		return null;
+	}
+	if (isTerminalStatus(task.status)) {
+		return `This task is ${task.status} and can't be started`;
+	}
+	if (me.startedAt) {
+		return isDelivery
+			? 'Items already loaded'
+			: "You've already started this task";
+	}
+	return null;
+}
+
+/** Why End / Deliver is blocked, or null when the action is allowed. */
+function getEndBlockedReason(
+	task: TaskDetail,
+	me: TaskDetail['crewMembers'][number] | undefined,
+	isDelivery: boolean,
+	busy: boolean,
+): string | null {
+	if (busy) return 'Please wait…';
+	if (!me) return "You're not assigned to this task";
+	if (isTerminalStatus(task.status)) {
+		return `This task is already ${task.status}`;
+	}
+	if (!me.startedAt) {
+		return isDelivery ? 'Load the items first' : 'Start the task first';
+	}
+	if (me.endedAt) {
+		return isDelivery
+			? 'You already delivered the items'
+			: "You've already ended this task";
+	}
+	return null;
+}
+
 function TaskViewBody({
 	task,
 	userId,
@@ -254,18 +388,40 @@ function TaskViewBody({
 	const [mediaBusy, setMediaBusy] = useState(false);
 	const [mediaError, setMediaError] = useState<string | null>(null);
 	const [cameraOpen, setCameraOpen] = useState(false);
+	const [toast, setToast] = useState<{
+		message: string;
+		id: number;
+	} | null>(null);
 	const address = task.destinationAddress.trim();
 	const destinationName = task.destinationAddressName.trim();
 	const canNavigate = Boolean(address);
 	const isDelivery = task.taskType === 'Delivery';
 
 	const me = userId ? task.crewMembers.find((m) => m.id === userId) : undefined;
-	const canReopenCompleted = task.status === 'Completed';
-	const canStart =
-		Boolean(me) &&
-		(canReopenCompleted || (!me?.startedAt && !isTerminalStatus(task.status)));
-	const canEnd =
-		Boolean(me?.startedAt) && !me?.endedAt && !isTerminalStatus(task.status);
+	const startBlockedReason = getStartBlockedReason(
+		task,
+		me,
+		isDelivery,
+		eventBusy || mediaBusy,
+	);
+	const canStart = startBlockedReason == null;
+	const endBlockedReason = getEndBlockedReason(
+		task,
+		me,
+		isDelivery,
+		eventBusy || mediaBusy,
+	);
+	const canEnd = endBlockedReason == null;
+
+	useEffect(() => {
+		if (!toast) return;
+		const id = window.setTimeout(() => setToast(null), 2800);
+		return () => window.clearTimeout(id);
+	}, [toast]);
+
+	const showToast = (message: string) => {
+		setToast({ message, id: Date.now() });
+	};
 
 	const openCamera = () => {
 		setCameraOpen(true);
@@ -309,14 +465,14 @@ function TaskViewBody({
 		if (eventBusy) return;
 		if (
 			eventType === 'started' &&
-			task.status === 'Completed' &&
-			!window.confirm(
-				isDelivery
-					? 'This task is completed. Loading items will remove the completed status and change the task to Loaded. Continue?'
-					: 'This task is completed. Starting it will remove the completed status and change the task to In Progress. Continue?',
-			)
+			(task.status === 'Completed' || task.status === 'Undetermined')
 		) {
-			return;
+			const nextStatus = isDelivery ? 'Loaded' : 'In Progress';
+			const action = isDelivery ? 'Loading items' : 'Starting it';
+			const ok = window.confirm(
+				`This task is ${task.status.toLowerCase()}. ${action} will change the task to ${nextStatus}. Continue?`,
+			);
+			if (!ok) return;
 		}
 		setEventBusy(true);
 		setEventError(null);
@@ -384,14 +540,28 @@ function TaskViewBody({
 				<ActionButton
 					label={isDelivery ? 'Load items' : 'Start task'}
 					icon={isDelivery ? Package : Play}
-					disabled={!canStart || eventBusy || mediaBusy}
-					onClick={() => void logCrewEvent('started')}
+					disabled={!canStart}
+					explainDisabled={!canStart}
+					onClick={() => {
+						if (startBlockedReason) {
+							showToast(startBlockedReason);
+							return;
+						}
+						void logCrewEvent('started');
+					}}
 				/>
 				<ActionButton
 					label={isDelivery ? 'Deliver items' : 'End task'}
 					icon={CheckCircle}
-					disabled={!canEnd || eventBusy || mediaBusy}
-					onClick={onEndTask}
+					disabled={!canEnd}
+					explainDisabled={!canEnd}
+					onClick={() => {
+						if (endBlockedReason) {
+							showToast(endBlockedReason);
+							return;
+						}
+						onEndTask();
+					}}
 				/>
 				<PhotoActionButton
 					disabled={eventBusy || mediaBusy}
@@ -399,6 +569,19 @@ function TaskViewBody({
 					onPickLibrary={openLibrary}
 				/>
 			</div>
+
+			<TaskViewBanners task={task} />
+
+			{toast ? (
+				<div
+					key={toast.id}
+					className='task-view-toast'
+					role='status'
+					aria-live='polite'
+				>
+					{toast.message}
+				</div>
+			) : null}
 
 			{eventError ? (
 				<Alert color='red' title='Check-in failed'>
@@ -490,74 +673,32 @@ function TaskViewBody({
 				</div>
 			</div>
 
-			<TaskStartedCrew
-				status={task.status}
-				crewMembers={task.crewMembers}
-			/>
-
 			<div className='task-view-section'>
-				<Field
-					label='Crew'
-					value={
-						task.crewMembers.length
-							? task.crewMembers
-									.map((m) => formatShortName(m.displayName))
-									.join(', ')
-							: 'Unassigned'
-					}
-				/>
-			</div>
-
-			{(task.completionNotes?.length ?? 0) > 0 ? (
-				<div className='task-view-section'>
-					{task.completionNotes.map((entry) => {
-						const at = entry.updatedAt || entry.createdAt;
-						const d = at ? new Date(at) : null;
-						const when =
-							d && !Number.isNaN(d.getTime())
-								? d.toLocaleString(undefined, {
-										year: 'numeric',
-										month: 'short',
-										day: 'numeric',
-										hour: 'numeric',
-										minute: '2-digit',
-									})
-								: '—';
-						const label = entry.outcome === 'Failed' ? 'Failed' : 'Completed';
-						const who = formatShortName(entry.displayName);
-						return (
-							<div key={entry.userId} className='task-view-field'>
-								<span className='task-view-field-label'>
-									{entry.outcome === 'Failed'
-										? 'Failed reason'
-										: 'Completed notes'}
+				<span className='task-view-field-label'>Crew</span>
+				{task.crewMembers.length === 0 ? (
+					<span className='task-view-field-value'>Unassigned</span>
+				) : (
+					<div className='task-view-crew'>
+						{task.crewMembers.map((member) => (
+							<div
+								key={member.id}
+								className={
+									member.isLead
+										? 'task-view-crew-member task-view-crew-member--lead'
+										: 'task-view-crew-member'
+								}
+							>
+								<span className='task-view-crew-member-name'>
+									{formatShortName(member.displayName)}
 								</span>
-								<span className='task-view-field-value'>
-									{entry.notes?.trim() || '—'}
-								</span>
-								<span className='task-view-completion-meta'>
-									{label} at {when} by {who}
+								<span className='task-view-crew-member-role'>
+									{member.isLead ? 'Lead' : 'Sub'}
 								</span>
 							</div>
-						);
-					})}
-				</div>
-			) : task.status === 'Failed' ? (
-				<div className='task-view-section'>
-					<Field label='Failed reason' value={task.failedReason ?? ''} />
-				</div>
-			) : task.status === 'Completed' || task.completedNotes ? (
-				<div className='task-view-section'>
-					<Field
-						label='Completed notes'
-						value={task.completedNotes ?? ''}
-					/>
-				</div>
-			) : task.failedReason ? (
-				<div className='task-view-section'>
-					<Field label='Failed reason' value={task.failedReason} />
-				</div>
-			) : null}
+						))}
+					</div>
+				)}
+			</div>
 
 			<div className='task-view-section'>
 				<TaskAttachments
@@ -603,6 +744,25 @@ export function TaskViewPage() {
 
 	useAndroidBackHandler(goBack, true);
 
+	const refreshTask = useCallback(
+		async (signal?: AbortSignal) => {
+			if (!Number.isFinite(taskId) || taskId <= 0) {
+				setTask(null);
+				setError('Invalid task id');
+				return;
+			}
+			setError(null);
+			try {
+				const next = await getTask(taskId, signal);
+				if (!signal?.aborted) setTask(next);
+			} catch (err: unknown) {
+				if (err instanceof DOMException && err.name === 'AbortError') return;
+				setError(err instanceof Error ? err.message : 'Failed to load task');
+			}
+		},
+		[taskId],
+	);
+
 	useEffect(() => {
 		if (!Number.isFinite(taskId) || taskId <= 0) {
 			setTask(null);
@@ -616,20 +776,22 @@ export function TaskViewPage() {
 		setError(null);
 		setTask(null);
 
-		getTask(taskId, controller.signal)
-			.then((next) => {
-				if (!controller.signal.aborted) setTask(next);
-			})
-			.catch((err: unknown) => {
-				if (err instanceof DOMException && err.name === 'AbortError') return;
-				setError(err instanceof Error ? err.message : 'Failed to load task');
-			})
-			.finally(() => {
-				if (!controller.signal.aborted) setLoading(false);
-			});
+		void refreshTask(controller.signal).finally(() => {
+			if (!controller.signal.aborted) setLoading(false);
+		});
 
 		return () => controller.abort();
-	}, [taskId]);
+	}, [taskId, refreshTask]);
+
+	const isMobile = useMediaQuery(AG_GRID_MOBILE_MQ);
+	const {
+		scrollRef: ptrScrollRef,
+		pullPosition,
+		isRefreshing: ptrRefreshing,
+	} = useFieldPullToRefresh({
+		enabled: Boolean(isMobile),
+		onRefresh: refreshTask,
+	});
 
 	const handleCrewEvent = async (eventType: CrewEventType) => {
 		if (!task || !user) {
@@ -674,7 +836,13 @@ export function TaskViewPage() {
 	};
 
 	return (
-		<Box className='task-view-page'>
+		<Box ref={ptrScrollRef} className='task-view-page'>
+			{isMobile ? (
+				<PullToRefreshIndicator
+					pullPosition={pullPosition}
+					isRefreshing={ptrRefreshing}
+				/>
+			) : null}
 			<header className='task-view-header'>
 				<UnstyledButton
 					onClick={goBack}
@@ -699,14 +867,10 @@ export function TaskViewPage() {
 				)}
 			</header>
 
-			{loading ? (
+			{loading && !task ? (
 				<Group justify='center' py='xl'>
 					<Loader size='sm' />
 				</Group>
-			) : error ? (
-				<Alert color='red' title='Could not load task'>
-					{error}
-				</Alert>
 			) : task ? (
 				<TaskViewBody
 					task={task}
@@ -723,6 +887,10 @@ export function TaskViewPage() {
 						setTask((prev) => (prev ? { ...prev, attachments } : prev))
 					}
 				/>
+			) : error ? (
+				<Alert color='red' title='Could not load task'>
+					{error}
+				</Alert>
 			) : null}
 		</Box>
 	);

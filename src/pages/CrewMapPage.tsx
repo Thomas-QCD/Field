@@ -10,7 +10,6 @@ import {
 	type CrewLocation,
 } from '../api/crewLocations';
 import { useCurrentUser } from '../context/CurrentUserContext';
-import { htmlToPlainText } from '../taskDescHtml';
 
 /** Downtown Las Vegas — hard-coded for MVP. */
 const LAS_VEGAS_CENTER: [number, number] = [36.1699, -115.1398];
@@ -37,6 +36,12 @@ function formatRecordedAt(iso: string): string {
 	});
 }
 
+/** Same task identity shown on task cards: type plus external key when present. */
+function taskLabel(loc: CrewLocation): string {
+	const key = loc.externalKey.trim();
+	return key ? `${loc.taskType} - #${key}` : loc.taskType;
+}
+
 function crewMarkerIcon(initials: string) {
 	return divIcon({
 		className: 'field-crew-marker',
@@ -61,32 +66,32 @@ function CrewMapMarkers({ locations }: { locations: CrewLocation[] }) {
 
 	return (
 		<>
-			{locations.map((loc) => (
-				<Marker
-					key={loc.userId}
-					position={[loc.latitude, loc.longitude]}
-					icon={icons[loc.userId]}
-				>
-					<Popup>
-						<div className='field-crew-popup'>
-							<strong>{loc.displayName}</strong>
-							<div>
-								{loc.eventType === 'started' ? 'Started' : 'Ended'} ·{' '}
-								{formatRecordedAt(loc.recordedAt)}
+			{locations.map((loc) => {
+				const jobTitle = loc.jobTitle.trim();
+				const location = loc.destinationAddress.trim();
+				return (
+					<Marker
+						key={loc.userId}
+						position={[loc.latitude, loc.longitude]}
+						icon={icons[loc.userId]}
+					>
+						<Popup>
+							<div className='field-crew-popup'>
+								<strong>{loc.displayName}</strong>
+								<div>
+									{loc.eventType === 'started'
+										? 'Started'
+										: 'Ended'}{' '}
+									· {formatRecordedAt(loc.recordedAt)}
+								</div>
+								<div>{taskLabel(loc)}</div>
+								{jobTitle ? <div>{jobTitle}</div> : null}
+								{location ? <div>{location}</div> : null}
 							</div>
-							<div>
-								Task #{loc.taskId}
-								{loc.taskDesc
-									? ` — ${htmlToPlainText(loc.taskDesc)}`
-									: ''}
-							</div>
-							{loc.accuracyMeters != null ? (
-								<div>±{Math.round(loc.accuracyMeters)} m</div>
-							) : null}
-						</div>
-					</Popup>
-				</Marker>
-			))}
+						</Popup>
+					</Marker>
+				);
+			})}
 		</>
 	);
 }

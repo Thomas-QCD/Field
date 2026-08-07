@@ -42,6 +42,11 @@ export function CompleteTaskPage() {
 	const saveLabel =
 		outcome === 'Failed' ? 'Save failed task' : 'Save completed task';
 	const notesLabel = outcome === 'Failed' ? 'Failed reason' : 'Completed notes';
+	const headerTitle = outcome === 'Failed' ? 'Fail Task' : 'Complete Task';
+	const emailDisclaimer =
+		outcome === 'Failed'
+			? 'Marking this task as failed will send email(s) to the contacts.'
+			: 'Marking this task as completed will send email(s) to the contacts.';
 
 	const handleSave = async () => {
 		if (busy) return;
@@ -53,6 +58,10 @@ export function CompleteTaskPage() {
 			setError('Select a user before ending a task');
 			return;
 		}
+		if (outcome === 'Failed' && notes.length === 0) {
+			setError('Failed reason is required');
+			return;
+		}
 
 		setBusy(true);
 		setError(null);
@@ -62,7 +71,7 @@ export function CompleteTaskPage() {
 				userId: user.id,
 				eventType: 'ended',
 				outcome,
-				notes: notes.trim(),
+				notes,
 				latitude: geo.latitude,
 				longitude: geo.longitude,
 				accuracyMeters: geo.accuracyMeters,
@@ -88,7 +97,7 @@ export function CompleteTaskPage() {
 					<ChevronLeft size={28} strokeWidth={2} aria-hidden />
 				</UnstyledButton>
 				<Text fw={700} fz='lg' lineClamp={1} className='task-view-title'>
-					Complete Task
+					{headerTitle}
 				</Text>
 				<span className='task-view-type' aria-hidden />
 			</header>
@@ -130,11 +139,15 @@ export function CompleteTaskPage() {
 			</div>
 
 			<div className='complete-task-footer'>
+				<Text size='xs' c='dimmed' ta='center' mb='sm'>
+					{emailDisclaimer}
+				</Text>
 				<Button
 					fullWidth
 					size='md'
 					color={outcome === 'Failed' ? 'red' : 'brand'}
 					loading={busy}
+					disabled={outcome === 'Failed' && notes.length === 0}
 					onClick={() => void handleSave()}
 				>
 					{saveLabel}
